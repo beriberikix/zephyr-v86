@@ -10,6 +10,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/device.h>
+#include <zephyr/version.h>
 
 /* Custom shell command: version */
 static int cmd_version(const struct shell *sh, size_t argc, char **argv)
@@ -18,7 +19,7 @@ static int cmd_version(const struct shell *sh, size_t argc, char **argv)
 	ARG_UNUSED(argv);
 
 	shell_print(sh, "Zephyr v86 Simulator - Version 1.0");
-	shell_print(sh, "RTOS: Zephyr %s", CONFIG_KERNEL_VERSION_STRING);
+	shell_print(sh, "RTOS: Zephyr %s", KERNEL_VERSION_STRING);
 	shell_print(sh, "Board: qemu_x86");
 	shell_print(sh, "Compiled: " __DATE__ " " __TIME__);
 

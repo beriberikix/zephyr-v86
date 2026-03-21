@@ -5,6 +5,10 @@ manifest:
   projects:
     - name: zephyr
       remote: zephyr
-      revision: zephyr-v4.3.0
+      revision: v4.3.0
       path: zephyr
-      import: true
+      import:
+        # Keep imports minimal for this qemu_x86 shell-focused app.
+        # Add project names here only if future features require them.
+        name-allowlist:
+          - cmsis

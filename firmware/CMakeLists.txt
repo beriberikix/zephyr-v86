@@ -4,6 +4,4 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(zephyr_qemu_app LANGUAGES C)
 
-set(BOARD qemu_x86)
-
 target_sources(app PRIVATE src/main.c)
