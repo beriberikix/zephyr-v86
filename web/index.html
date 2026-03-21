@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta http-equiv="X-UA-Compatible" content="ie=edge">
+	<title>Zephyr QEMU x86 in v86 + xterm.js</title>
+	
+	<!-- xterm.js CSS from CDN -->
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.css">
+	
+	<!-- Application styles -->
+	<link rel="stylesheet" href="style.css">
+</head>
+<body>
+	<!-- v86 emulator instance (hidden; serial-only interaction) -->
+	<canvas id="emulator" style="display: none;"></canvas>
+	
+	<!-- xterm.js terminal container -->
+	<div id="terminal-container">
+		<div id="terminal"></div>
+	</div>
+
+	<!-- v86 library (build/libv86.js) -->
+	<!-- If using local libv86, uncomment and adjust path:
+	<script src="lib/libv86.js"></script>
+	-->
+	
+	<!-- For production, use a built v86 from the v86 repository.
+	     For development, ensure libv86.js and libv86.wasm are in lib/ directory.
+	     Alternatively, use the CDN or build v86 yourself.
+	     This example uses a local libv86.js (must be downloaded and placed in lib/).
+	-->
+	<script src="lib/libv86.js"></script>
+	
+	<!-- xterm.js from CDN -->
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/addon-fit.min.js"></script>
+	
+	<!-- Application initialization -->
+	<script src="app.js"></script>
+</body>
+</html>

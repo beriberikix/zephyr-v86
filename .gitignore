@@ -1,0 +1,42 @@
+# Zephyr build artifacts
+firmware/.west/
+firmware/build/
+firmware/CMakeFiles/
+firmware/CMakeCache.txt
+firmware/cmake_install.cmake
+
+# Build output
+*.elf
+*.bin
+*.hex
+*.o
+*.a
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Web dev dependencies and artifacts
+web/lib/
+web/node_modules/
+web/zephyr.elf
+web/*.wasm
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+
+# Environment files
+.env
+.env.local
+
+# Temporary files
+*.tmp
+*.temp

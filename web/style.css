@@ -1,0 +1,107 @@
+/* ===== xterm.js Terminal Styling ===== */
+
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+html, body {
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	background-color: #1e1e1e;
+}
+
+body {
+	font-family: 'Courier New', monospace;
+	font-size: 14px;
+}
+
+/* Terminal container fills viewport */
+#terminal-container {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	background-color: #1e1e1e;
+	color: #d4d4d4;
+}
+
+#terminal {
+	flex: 1;
+	overflow: hidden;
+	padding: 10px;
+}
+
+/* xterm.js terminal customizations */
+.xterm-screen {
+	background-color: #1e1e1e;
+	color: #d4d4d4;
+}
+
+.xterm-viewport {
+	background-color: #1e1e1e;
+}
+
+.xterm-cursor-layer {
+	opacity: 1;
+}
+
+.xterm-cursor {
+	background-color: #aeafad;
+	color: #1e1e1e;
+}
+
+.xterm-underline {
+	text-decoration: underline;
+}
+
+.xterm-inverse {
+	background-color: #d4d4d4;
+	color: #1e1e1e;
+}
+
+/* Selection styling */
+.xterm-selection {
+	background-color: rgba(38, 79, 120, 0.4);
+}
+
+/* ANSI color palette overrides (optional, for better aesthetics) */
+.xterm-color-0 { color: #000000; } /* Black */
+.xterm-color-1 { color: #e74c3c; } /* Red */
+.xterm-color-2 { color: #2ecc71; } /* Green */
+.xterm-color-3 { color: #f39c12; } /* Yellow */
+.xterm-color-4 { color: #3498db; } /* Blue */
+.xterm-color-5 { color: #9b59b6; } /* Magenta */
+.xterm-color-6 { color: #1abc9c; } /* Cyan */
+.xterm-color-7 { color: #bdc3c7; } /* White */
+
+/* Scrollbar styling (if visible) */
+::-webkit-scrollbar {
+	width: 10px;
+}
+
+::-webkit-scrollbar-track {
+	background: #1e1e1e;
+}
+
+::-webkit-scrollbar-thumb {
+	background: #404040;
+	border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: #505050;
+}
+
+/* Responsive adjustments for small screens */
+@media (max-width: 768px) {
+	body {
+		font-size: 12px;
+	}
+
+	#terminal {
+		padding: 5px;
+	}
+}
