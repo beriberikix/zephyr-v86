@@ -61,6 +61,92 @@ function show_progress(e)
     }
 }
 
+function show_missing_assets_message(missing_required, missing_optional)
+{
+    const loading = $("loading");
+    loading.style.display = "block";
+
+    const lines = ["Cannot start emulator: required VM assets are missing.", ""];
+
+    if(missing_required.length)
+    {
+        lines.push("Missing required files:");
+        for(const file of missing_required)
+        {
+            lines.push("- " + file);
+        }
+        lines.push("");
+    }
+
+    if(missing_optional.length)
+    {
+        lines.push("Missing optional files:");
+        for(const file of missing_optional)
+        {
+            lines.push("- " + file);
+        }
+        lines.push("");
+    }
+
+    lines.push("Regenerate assets from repo root:");
+    lines.push("  ./tools/build-v86-image.sh --docker --output web");
+    lines.push("  west build -d build -b native_sim/native firmware --pristine=auto");
+    lines.push("  cp build/zephyr/zephyr.exe web/zephyr.exe");
+
+    loading.textContent = lines.join("\n");
+}
+
+async function probe_asset(url)
+{
+    try
+    {
+        const response = await fetch(url, { method: "HEAD", cache: "no-store" });
+        return response.ok;
+    }
+    catch(_err)
+    {
+        return false;
+    }
+}
+
+async function preflight_assets()
+{
+    const required = ["v86-bzimage.bin", "v86-rootfs.cpio.xz"];
+    const optional = ["zephyr.exe"];
+
+    const missing_required = [];
+    const missing_optional = [];
+
+    for(const file of required)
+    {
+        if(!(await probe_asset(file)))
+        {
+            missing_required.push(file);
+        }
+    }
+
+    for(const file of optional)
+    {
+        if(!(await probe_asset(file)))
+        {
+            missing_optional.push(file);
+        }
+    }
+
+    if(missing_required.length)
+    {
+        show_missing_assets_message(missing_required, missing_optional);
+        return { ok: false, missing_optional };
+    }
+
+    if(missing_optional.length)
+    {
+        console.warn("Missing optional startup assets:", missing_optional.join(", "));
+    }
+
+    return { ok: true, missing_optional };
+}
+
 function create_buildroot_settings()
 {
     return {
@@ -329,8 +415,14 @@ function init_runtime(emulator)
     });
 }
 
-function start_buildroot()
+async function start_buildroot()
 {
+    const preflight = await preflight_assets();
+    if(!preflight.ok)
+    {
+        return;
+    }
+
     $("boot_options").style.display = "none";
 
     const emulator = new V86(create_buildroot_settings());
@@ -363,5 +455,5 @@ window.addEventListener("load", function()
     };
 
     // Auto-start Buildroot profile
-    start_buildroot();
+    void start_buildroot();
 });
