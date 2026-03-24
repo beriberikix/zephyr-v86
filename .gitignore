@@ -4,6 +4,7 @@ firmware/build/
 firmware/CMakeFiles/
 firmware/CMakeCache.txt
 firmware/cmake_install.cmake
+build/
 
 # Build output
 *.elf

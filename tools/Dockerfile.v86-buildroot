@@ -1,0 +1,88 @@
+# Dockerfile.v86-buildroot
+# Builds a Buildroot-based Linux image with 9p filesystem support for v86 emulation.
+# 
+# This Dockerfile uses the proven v86-buildroot configuration from:
+#   https://github.com/chschnell/v86-buildroot
+#
+# The v86-buildroot project provides:
+#   - Tested kernel config optimized for v86 emulator
+#   - Minimal busybox rootfs
+#   - 9p filesystem support
+#   - Full Virtio device support (console, net, block)
+#
+# Usage:
+#   docker build -f tools/Dockerfile.v86-buildroot -t zephyr-v86-buildroot:latest .
+#   ./tools/build-v86-image.sh --docker --output web
+#
+# Output artifacts:
+#   - bzImage kernel (compressed, ~3-5 MB)
+#   - rootfs.cpio.xz (initramfs with 9p support, ~2-3 MB)
+#
+
+FROM debian:bookworm-slim as builder
+
+# Install Buildroot build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    wget \
+    curl \
+    ca-certificates \
+    bc \
+    cpio \
+    unzip \
+    rsync \
+    file \
+    xz-utils \
+    libssl-dev \
+    libncurses5-dev \
+    libelf-dev \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+ENV FORCE_UNSAFE_CONFIGURE=1
+
+# Clone v86-buildroot (proven, tested configuration for v86 emulator)
+# sslVerify=false is used here because some CI/dev environments inject custom TLS
+# intercept certs not present inside minimal containers.
+RUN git -c http.sslVerify=false clone --depth 1 https://github.com/chschnell/v86-buildroot.git . && \
+    echo "[*] v86-buildroot cloned successfully"
+
+# Bootstrap Buildroot (downloads Buildroot source)
+RUN make bootstrap
+
+# Build bzImage with default v86 config
+# This uses the proven kernel + busybox config from v86-buildroot
+RUN make buildroot-defconfig && \
+    make all
+
+# Copy artifacts to root for extraction.
+# Buildroot configs can produce either rootfs.cpio.xz or rootfs.cpio.
+# Always export /root/rootfs.cpio.xz so downstream scripts stay stable.
+RUN set -eux; \
+    cp build/v86/images/bzImage /root/bzImage; \
+    if [ -f build/v86/images/rootfs.cpio.xz ]; then \
+        cp build/v86/images/rootfs.cpio.xz /root/rootfs.cpio.xz; \
+    elif [ -f build/v86/images/rootfs.cpio ]; then \
+        xz -c -9e build/v86/images/rootfs.cpio > /root/rootfs.cpio.xz; \
+    else \
+        echo "[!] Could not find rootfs.cpio.xz or rootfs.cpio in build/v86/images"; \
+        ls -lah build/v86/images; \
+        exit 1; \
+    fi; \
+    echo "[*] Build artifacts ready:"; \
+    ls -lh /root/
+
+# Final stage: output artifacts
+FROM scratch
+
+COPY --from=builder /root/bzImage /
+COPY --from=builder /root/rootfs.cpio.xz /
+
+# Note: Extract artifacts from built image using docker cp:
+# TEMP_CONTAINER=$(docker create zephyr-v86-buildroot:latest)
+# docker cp $TEMP_CONTAINER:/bzImage web/v86-bzimage.bin
+# docker cp $TEMP_CONTAINER:/rootfs.cpio.xz web/v86-rootfs.cpio.xz
+# docker rm $TEMP_CONTAINER
