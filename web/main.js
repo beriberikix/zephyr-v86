@@ -5,6 +5,219 @@ function $(id)
     return document.getElementById(id);
 }
 
+const THEME_STORAGE_KEY = "zephyr-v86-theme-mode";
+
+function get_system_theme()
+{
+    if(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches)
+    {
+        return "dark";
+    }
+    return "light";
+}
+
+function apply_theme_mode(mode)
+{
+    const resolved = mode === "system" ? get_system_theme() : mode;
+    document.documentElement.setAttribute("data-theme", resolved);
+}
+
+function init_theme_mode()
+{
+    const select = $("theme_mode");
+    if(!select)
+    {
+        return;
+    }
+
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    const mode = stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+    select.value = mode;
+    apply_theme_mode(mode);
+
+    select.addEventListener("change", function()
+    {
+        const next_mode = this.value;
+        localStorage.setItem(THEME_STORAGE_KEY, next_mode);
+        apply_theme_mode(next_mode);
+    });
+
+    if(window.matchMedia)
+    {
+        const media = window.matchMedia("(prefers-color-scheme: dark)");
+        const on_change = function()
+        {
+            if(select.value === "system")
+            {
+                apply_theme_mode("system");
+            }
+        };
+
+        if(media.addEventListener)
+        {
+            media.addEventListener("change", on_change);
+        }
+        else if(media.addListener)
+        {
+            media.addListener(on_change);
+        }
+    }
+}
+
+function init_serial_accordion()
+{
+    const toggle = $("toggle_serial");
+    const body = $("serial_body");
+    if(!toggle || !body)
+    {
+        return;
+    }
+
+    const update = function(expanded)
+    {
+        body.classList.toggle("is-collapsed", !expanded);
+        toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+        toggle.textContent = expanded ? "Hide" : "Show";
+
+        if(expanded)
+        {
+            // Helps xterm and canvas layouts settle after container expansion.
+            requestAnimationFrame(function()
+            {
+                window.dispatchEvent(new Event("resize"));
+            });
+        }
+    };
+
+    update(false);
+
+    toggle.addEventListener("click", function()
+    {
+        const is_expanded = toggle.getAttribute("aria-expanded") === "true";
+        update(!is_expanded);
+    });
+}
+
+function set_status(text, kind)
+{
+    const badge = $("status_badge");
+    if(!badge)
+    {
+        return;
+    }
+
+    badge.textContent = text;
+    badge.classList.remove("chip--live", "chip--muted", "chip--error");
+    if(kind === "error")
+    {
+        badge.classList.add("chip--error");
+    }
+    else if(kind === "muted")
+    {
+        badge.classList.add("chip--muted");
+    }
+    else
+    {
+        badge.classList.add("chip--live");
+    }
+}
+
+function init_utility_tabs()
+{
+    const tablist = document.querySelector(".tablist");
+    const triggers = Array.from(document.querySelectorAll(".tab-trigger"));
+    if(!tablist || !triggers.length)
+    {
+        return {
+            markActivity: function() {},
+        };
+    }
+
+    const activate_tab = function(trigger)
+    {
+        for(const item of triggers)
+        {
+            const is_active = item === trigger;
+            item.classList.toggle("is-active", is_active);
+            item.setAttribute("aria-selected", is_active ? "true" : "false");
+            item.tabIndex = is_active ? 0 : -1;
+
+            const panel_id = item.getAttribute("aria-controls");
+            const panel = panel_id ? $(panel_id) : null;
+            if(panel)
+            {
+                panel.classList.toggle("is-active", is_active);
+                panel.hidden = !is_active;
+            }
+        }
+
+        trigger.classList.remove("has-activity");
+    };
+
+    for(const trigger of triggers)
+    {
+        trigger.addEventListener("click", function()
+        {
+            activate_tab(trigger);
+        });
+    }
+
+    tablist.addEventListener("keydown", function(event)
+    {
+        const current_index = triggers.indexOf(document.activeElement);
+        if(current_index === -1)
+        {
+            return;
+        }
+
+        let next_index = current_index;
+        if(event.key === "ArrowRight")
+        {
+            next_index = (current_index + 1) % triggers.length;
+        }
+        else if(event.key === "ArrowLeft")
+        {
+            next_index = (current_index - 1 + triggers.length) % triggers.length;
+        }
+        else if(event.key === "Home")
+        {
+            next_index = 0;
+        }
+        else if(event.key === "End")
+        {
+            next_index = triggers.length - 1;
+        }
+        else if(event.key === "Enter" || event.key === " ")
+        {
+            activate_tab(document.activeElement);
+            event.preventDefault();
+            return;
+        }
+        else
+        {
+            return;
+        }
+
+        triggers[next_index].focus();
+        event.preventDefault();
+    });
+
+    const selected = triggers.find(trigger => trigger.getAttribute("aria-selected") === "true") || triggers[0];
+    activate_tab(selected);
+
+    return {
+        markActivity: function(tab_name)
+        {
+            const trigger = $("tab_trigger_" + tab_name);
+            if(!trigger || trigger.getAttribute("aria-selected") === "true")
+            {
+                return;
+            }
+            trigger.classList.add("has-activity");
+        },
+    };
+}
+
 function format_timestamp(seconds)
 {
     if(seconds < 60)
@@ -54,10 +267,12 @@ function show_progress(e)
     {
         const pct = Math.max(0, Math.min(100, Math.floor((e.loaded / e.total) * 100)));
         loading.textContent = "Downloading " + e.file_name + " ... " + pct + "%";
+        set_status("Downloading " + pct + "%", "muted");
     }
     else
     {
         loading.textContent = "Downloading " + e.file_name + " ...";
+        set_status("Downloading assets", "muted");
     }
 }
 
@@ -94,6 +309,7 @@ function show_missing_assets_message(missing_required, missing_optional)
     lines.push("  cp build/zephyr/zephyr.exe web/zephyr.exe");
 
     loading.textContent = lines.join("\n");
+    set_status("Missing required assets", "error");
 }
 
 async function probe_asset(url)
@@ -176,7 +392,8 @@ function create_buildroot_settings()
 
 function init_filesystem_panel(emulator)
 {
-    $("filesystem_panel").style.display = "block";
+    $("filesystem_panel").style.display = "grid";
+    const tab_state = window.ui_tabs || { markActivity: function() {} };
 
     $("filesystem_send_file").onchange = async function()
     {
@@ -188,6 +405,8 @@ function init_filesystem_panel(emulator)
             $("info_filesystem").style.display = "block";
             $("info_filesystem_last_file").textContent = "/" + file.name;
             $("info_filesystem_status").textContent = "Uploaded";
+            set_status("File uploaded", "muted");
+            tab_state.markActivity("files");
         }
         this.value = "";
         this.blur();
@@ -214,11 +433,14 @@ function init_filesystem_panel(emulator)
             const filename = parts[parts.length - 1] || "root";
             dump_file(result, filename);
             this.value = "";
+            set_status("File downloaded", "muted");
+            tab_state.markActivity("files");
         }
         catch(err)
         {
             alert("Could not read file: " + path);
             console.error(err);
+            set_status("File read failed", "error");
         }
         finally
         {
@@ -243,6 +465,7 @@ function init_filesystem_panel(emulator)
             $("info_filesystem").style.display = "block";
             $("info_filesystem_last_file").textContent = "/zephyr.exe";
             $("info_filesystem_status").textContent = "Auto-injected";
+            tab_state.markActivity("files");
         }
         catch(err)
         {
@@ -254,9 +477,10 @@ function init_filesystem_panel(emulator)
 function init_runtime(emulator)
 {
     $("loading").style.display = "none";
-    $("runtime_options").style.display = "block";
+    $("runtime_options").style.display = "grid";
     $("runtime_infos").style.display = "block";
     $("screen_container").style.display = "block";
+    set_status("Running", "live");
 
     init_filesystem_panel(emulator);
 
@@ -271,11 +495,13 @@ function init_runtime(emulator)
         {
             $("run").textContent = "Run";
             await emulator.stop();
+            set_status("Paused", "muted");
         }
         else
         {
             $("run").textContent = "Pause";
             emulator.run();
+            set_status("Running", "live");
         }
         this.blur();
     };
@@ -288,6 +514,7 @@ function init_runtime(emulator)
 
     $("exit").onclick = async function()
     {
+        set_status("Stopped", "muted");
         await emulator.destroy();
         location.reload();
     };
@@ -296,6 +523,7 @@ function init_runtime(emulator)
     {
         const state = await emulator.save_state();
         dump_file(state, "v86state.bin");
+        set_status("State saved", "muted");
         this.blur();
     };
 
@@ -324,15 +552,18 @@ function init_runtime(emulator)
         {
             const state = await read_file(file);
             await emulator.restore_state(state);
+            set_status("State restored", "muted");
             if(was_running)
             {
                 emulator.run();
+                set_status("Running", "live");
             }
         }
         catch(err)
         {
             alert("State restore failed. Ensure state matches this VM configuration.");
             console.error(err);
+            set_status("State restore failed", "error");
         }
     };
 
@@ -371,6 +602,7 @@ function init_runtime(emulator)
     emulator.add_listener("emulator-started", function()
     {
         last_tick = Date.now();
+        set_status("Running", "live");
         if(timer !== null)
         {
             clearInterval(timer);
@@ -381,6 +613,7 @@ function init_runtime(emulator)
     emulator.add_listener("emulator-stopped", function()
     {
         update_info();
+        set_status("Paused", "muted");
         if(timer !== null)
         {
             clearInterval(timer);
@@ -390,12 +623,14 @@ function init_runtime(emulator)
 
     let fs_read = 0;
     let fs_write = 0;
+    const tab_state = window.ui_tabs || { markActivity: function() {} };
 
     emulator.add_listener("9p-read-start", function(args)
     {
         $("info_filesystem").style.display = "block";
         $("info_filesystem_status").textContent = "Loading ...";
         $("info_filesystem_last_file").textContent = args[0];
+        tab_state.markActivity("files");
     });
 
     emulator.add_listener("9p-read-end", function(args)
@@ -404,6 +639,7 @@ function init_runtime(emulator)
         $("info_filesystem_bytes_read").textContent = String(fs_read);
         $("info_filesystem_status").textContent = "Idle";
         $("info_filesystem_last_file").textContent = args[0];
+        tab_state.markActivity("files");
     });
 
     emulator.add_listener("9p-write-end", function(args)
@@ -412,11 +648,13 @@ function init_runtime(emulator)
         $("info_filesystem_bytes_written").textContent = String(fs_write);
         $("info_filesystem_last_file").textContent = args[0];
         $("info_filesystem_status").textContent = "Idle";
+        tab_state.markActivity("files");
     });
 }
 
 async function start_buildroot()
 {
+    set_status("Starting", "muted");
     const preflight = await preflight_assets();
     if(!preflight.ok)
     {
@@ -435,18 +673,24 @@ async function start_buildroot()
         const loading = $("loading");
         loading.style.display = "block";
         loading.textContent = "Loading failed: " + e.file_name;
+        set_status("Download failed", "error");
     });
 
     emulator.add_listener("emulator-ready", function()
     {
         // xterm.js is already loaded as a static script in index.html
         emulator.set_serial_container_xtermjs($("terminal"));
+        set_status("Ready", "live");
         init_runtime(emulator);
     });
 }
 
 window.addEventListener("load", function()
 {
+    init_theme_mode();
+    init_serial_accordion();
+    window.ui_tabs = init_utility_tabs();
+
     $("start_emulation").onclick = function(e)
     {
         e.preventDefault();

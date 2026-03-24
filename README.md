@@ -131,6 +131,26 @@ This avoids PTY allocation failures in constrained/containerized environments.
   - host -> guest upload (`create_file`)
   - guest -> host fetch (`read_file`)
 
+## UI Layout (Terminal-First)
+
+The web UI is organized around the serial terminal as the primary workspace.
+
+- Center stage:
+  - VGA/screen frame (`#screen_container`) and the main serial terminal (`#terminal`)
+- Right utility rail (tabs):
+  - **Controls**: Run, Reset, Exit
+  - **Files**: Upload/download controls + 9p stats/status
+  - **Metrics**: Running time, current speed, average speed
+  - **Session**: Save State / Load State
+- Top status bar:
+  - Current runtime state (initializing, running, paused, errors)
+
+Keyboard tips for utility tabs:
+
+- Move focus between tab buttons: Left/Right arrows
+- Jump to first/last tab: Home/End
+- Activate focused tab: Enter or Space
+
 ## Troubleshooting
 
 ### `could not open a new pty for the uart`

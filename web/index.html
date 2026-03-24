@@ -8,64 +8,148 @@
 <link rel="stylesheet" href="v86.css">
 <link rel="stylesheet" href="lib/xterm.css">
 
-<div>
-    <div id="boot_options">
-        <h3>v86 Buildroot Baseline</h3>
+<div class="app">
+    <header class="topbar">
+        <div class="topbar__title-wrap">
+            <p class="eyebrow">Zephyr + v86</p>
+            <h1 class="topbar__title">Native Sim Terminal Workspace</h1>
+        </div>
+        <div class="topbar__status">
+            <span class="chip chip--muted">Buildroot profile</span>
+            <span id="status_badge" class="chip chip--live">Initializing</span>
+            <label class="theme-picker" for="theme_mode">
+                Theme
+                <select id="theme_mode" aria-label="Theme mode">
+                    <option value="system">System</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                </select>
+            </label>
+        </div>
+    </header>
+
+    <div id="boot_options" class="boot-card">
+        <h2>v86 Buildroot Baseline</h2>
         <p>
-            Auto-booting known-good Buildroot profile. Use "Send files to emulator" to upload binaries into the VM.
+            Auto-booting known-good Buildroot profile. Use the Files tab to upload binaries into the VM.
         </p>
-        <button id="start_emulation">Start Emulation</button>
+        <button id="start_emulation" class="btn btn--primary">Start Emulation</button>
     </div>
 
-    <div id="runtime_options" style="display: none">
-        <button id="run">Pause</button>
-        <button id="reset">Reset</button>
-        <button id="exit">Exit</button>
-        <button id="save_state">Save State</button>
-        <button id="load_state">Load State</button>
-    </div>
-    <pre style="display: none" id="loading"></pre>
+    <main class="workspace">
+        <section class="terminal-stage">
+            <div id="screen_container" class="stage-frame" style="display: none">
+                <div id="screen"></div>
+                <canvas id="vga"></canvas>
+            </div>
+
+            <div class="terminal-shell">
+                <div class="terminal-shell__header">
+                    <div>
+                        <h2>Serial Terminal</h2>
+                        <p>Primary interaction surface</p>
+                    </div>
+                    <button id="toggle_serial" class="btn btn--ghost" type="button" aria-expanded="false" aria-controls="serial_body">Show</button>
+                </div>
+                <div id="serial_body" class="serial-body is-collapsed">
+                    <div id="terminal"></div>
+                </div>
+            </div>
+
+            <pre style="display: none" id="loading" class="status-log" aria-live="polite"></pre>
+        </section>
+
+        <aside class="utility-rail" aria-label="Runtime tools">
+            <div class="tablist" role="tablist" aria-label="Utility sections">
+                <button id="tab_trigger_controls" class="tab-trigger is-active" type="button" role="tab" aria-selected="true" aria-controls="tab_controls" tabindex="0">Controls</button>
+                <button id="tab_trigger_files" class="tab-trigger" type="button" role="tab" aria-selected="false" aria-controls="tab_files" tabindex="-1">Files</button>
+                <button id="tab_trigger_metrics" class="tab-trigger" type="button" role="tab" aria-selected="false" aria-controls="tab_metrics" tabindex="-1">Metrics</button>
+                <button id="tab_trigger_session" class="tab-trigger" type="button" role="tab" aria-selected="false" aria-controls="tab_session" tabindex="-1">Session</button>
+            </div>
+
+            <section id="tab_controls" class="tab-panel is-active" role="tabpanel" aria-labelledby="tab_trigger_controls">
+                <h3>Runtime Controls</h3>
+                <p class="panel-help">Core VM operations for execution flow.</p>
+                <div id="runtime_options" class="controls-grid" style="display: none">
+                    <button id="run" class="btn btn--primary">Pause</button>
+                    <button id="reset" class="btn">Reset</button>
+                    <button id="exit" class="btn btn--danger">Exit</button>
+                </div>
+            </section>
+
+            <section id="tab_files" class="tab-panel" role="tabpanel" aria-labelledby="tab_trigger_files" hidden>
+                <h3>File Operations</h3>
+                <p class="panel-help">Send or retrieve files through the 9p filesystem.</p>
+                <div id="filesystem_panel" class="stack" style="display: none">
+                    <label>
+                        Send files to emulator
+                        <input type="file" id="filesystem_send_file" multiple>
+                    </label>
+
+                    <label>
+                        Get file from emulator
+                        <input type="text" id="filesystem_get_file" placeholder="Absolute path">
+                    </label>
+                </div>
+
+                <div id="info_filesystem" class="metric-card" style="display: none">
+                    <div class="metric-card__title-row">
+                        <strong>9p Filesystem</strong>
+                        <span id="info_filesystem_status" class="chip chip--muted">Idle</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>Bytes read</span>
+                        <strong id="info_filesystem_bytes_read">0</strong>
+                    </div>
+                    <div class="metric-row">
+                        <span>Bytes written</span>
+                        <strong id="info_filesystem_bytes_written">0</strong>
+                    </div>
+                    <div class="metric-row metric-row--stacked">
+                        <span>Last file</span>
+                        <strong id="info_filesystem_last_file">-</strong>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab_metrics" class="tab-panel" role="tabpanel" aria-labelledby="tab_trigger_metrics" hidden>
+                <h3>Performance</h3>
+                <p class="panel-help">Runtime speed and uptime metrics.</p>
+                <div id="runtime_infos" class="stack" style="display: none">
+                    <div class="metric-card">
+                        <div class="metric-row">
+                            <span>Running</span>
+                            <strong id="running_time">0s</strong>
+                        </div>
+                        <div class="metric-row">
+                            <span>Speed</span>
+                            <strong><span id="speed">0</span> mIPS</strong>
+                        </div>
+                        <div class="metric-row">
+                            <span>Avg speed</span>
+                            <strong><span id="avg_speed">0</span> mIPS</strong>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab_session" class="tab-panel" role="tabpanel" aria-labelledby="tab_trigger_session" hidden>
+                <h3>Session State</h3>
+                <p class="panel-help">Save or restore this VM session.</p>
+                <div class="controls-grid">
+                    <button id="save_state" class="btn">Save State</button>
+                    <button id="load_state" class="btn">Load State</button>
+                </div>
+            </section>
+        </aside>
+    </main>
+
+    <footer class="app-footer">
+        <a href="https://copy.sh/v86/?profile=buildroot" target="_blank" rel="noopener noreferrer">Reference profile: copy.sh/v86/?profile=buildroot</a>
+    </footer>
+
+    <input type="file" id="state_input" style="display: none">
 </div>
-
-<div id="screen_container" style="display: none">
-    <div id="screen"></div>
-    <canvas id="vga"></canvas>
-</div>
-
-<div id="runtime_infos" style="display: none">
-    Running: <span id="running_time">0s</span> <br>
-    Speed: <span id="speed">0</span> mIPS<br>
-    Avg speed: <span id="avg_speed">0</span> mIPS<br>
-    <br>
-    <div id="info_filesystem" style="display: none">
-        <b>9p Filesystem</b><br>
-        Bytes read: <span id="info_filesystem_bytes_read">0</span><br>
-        Bytes written: <span id="info_filesystem_bytes_written">0</span><br>
-        <div style="white-space: nowrap; overflow-x: hidden">Last file: <span id="info_filesystem_last_file"></span></div>
-        Status: <span id="info_filesystem_status"></span><br>
-        <br>
-    </div>
-</div>
-
-<div id="filesystem_panel" style="display: none">
-    <label>
-        Send files to emulator<br>
-        <input type="file" id="filesystem_send_file" multiple>
-    </label>
-    <br><br>
-    <label>
-        Get file from emulator<br>
-        <input type="text" id="filesystem_get_file" placeholder="Absolute path">
-    </label>
-</div>
-
-<br style="clear: both"><br>
-<div id="terminal"></div>
-
-<input type="file" id="state_input" style="display: none">
-
-<hr>
-<a href="https://copy.sh/v86/?profile=buildroot" target="_blank" rel="noopener noreferrer">Reference profile: copy.sh/v86/?profile=buildroot</a>
 
 <script src="lib/libv86.js"></script>
 <script src="lib/xterm.js"></script>
