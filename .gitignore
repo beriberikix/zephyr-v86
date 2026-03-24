@@ -4,6 +4,7 @@ firmware/build/
 firmware/CMakeFiles/
 firmware/CMakeCache.txt
 firmware/cmake_install.cmake
+build/
 
 # Build output
 *.elf
@@ -25,6 +26,13 @@ web/lib/
 web/node_modules/
 web/zephyr.elf
 web/*.wasm
+web/zephyr.exe
+web/v86-rootfs.cpio.xz
+web/*.sha256
+
+# Nested/vendor repositories
+modules/
+zephyr/
 
 # Python cache
 __pycache__/
