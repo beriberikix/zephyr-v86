@@ -91,6 +91,8 @@ jobs:
       - name: Build Zephyr firmware
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+          # native_sim builds with host GCC — no Zephyr SDK needed
+          ZEPHYR_TOOLCHAIN_VARIANT: host
         run: |
           source /tmp/zephyr-venv/bin/activate
           west build -d firmware/build -b native_sim/native firmware --pristine=auto
