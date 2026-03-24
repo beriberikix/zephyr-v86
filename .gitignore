@@ -27,7 +27,6 @@ web/node_modules/
 web/zephyr.elf
 web/*.wasm
 web/zephyr.exe
-web/zephyr-multiboot.iso
 web/v86-rootfs.cpio.xz
 web/*.sha256
 
