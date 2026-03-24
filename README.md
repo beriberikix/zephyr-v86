@@ -1,6 +1,31 @@
 # Zephyr + v86 (Buildroot native_sim flow)
 
+[![Build and Deploy to GitHub Pages](https://github.com/beriberikix/zephyr-v86/actions/workflows/build-and-deploy.yml/badge.svg)](https://github.com/beriberikix/zephyr-v86/actions/workflows/build-and-deploy.yml)
+
 This repository runs a Linux guest in v86 and injects a Zephyr `native_sim` executable into that guest.
+
+## 🚀 Try the Demo
+
+**Live demo:** https://beriberikix.github.io/zephyr-v86/
+
+The demo is hosted on GitHub Pages and automatically updated when you trigger a build.
+
+### To trigger a build:
+
+1. Go to the [**Actions** tab](https://github.com/beriberikix/zephyr-v86/actions)
+2. Select **Build and Deploy to GitHub Pages** workflow
+3. Click **Run workflow**
+4. Wait ~20 minutes for the build to complete
+5. Once complete, refresh the demo link above
+
+**Build time breakdown:**
+- v86 image build (Docker): ~15 min
+- Zephyr native_sim build: ~5 min
+- GitHub Pages deployment: ~1 min
+
+**For more details:** See [`.github/DEPLOYMENT.md`](.github/DEPLOYMENT.md) for setup, troubleshooting, and advanced usage.
+
+---
 
 Current runtime path:
 

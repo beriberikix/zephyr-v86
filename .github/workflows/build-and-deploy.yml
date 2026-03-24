@@ -1,0 +1,206 @@
+name: Build and Deploy to GitHub Pages
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-v86:
+    name: Build v86 Image (Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build v86-buildroot Docker image
+        run: |
+          docker build \
+            -f tools/Dockerfile.v86-buildroot \
+            -t v86-buildroot:latest \
+            .
+
+      - name: Extract artifacts from Docker image
+        run: |
+          mkdir -p web
+          
+          # Create temporary container and extract files
+          docker create --name v86-temp v86-buildroot:latest
+          docker cp v86-temp:/bzImage web/v86-bzimage.bin
+          docker cp v86-temp:/rootfs.cpio.xz web/v86-rootfs.cpio.xz
+          docker rm v86-temp
+          
+          # Verify extraction
+          echo "=== Extracted files ==="
+          ls -lh web/v86-* || exit 1
+          
+          # Generate checksums
+          cd web
+          sha256sum v86-bzimage.bin > v86-bzimage.bin.sha256
+          sha256sum v86-rootfs.cpio.xz > v86-rootfs.cpio.xz.sha256
+          echo "=== Checksums ==="
+          cat v86-bzimage.bin.sha256
+          cat v86-rootfs.cpio.xz.sha256
+          cd ..
+
+      - name: Upload v86 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: v86-artifacts
+          path: |
+            web/v86-bzimage.bin
+            web/v86-rootfs.cpio.xz
+            web/v86-*.sha256
+          retention-days: 1
+
+  build-zephyr:
+    name: Build Zephyr native_sim
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Zephyr dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build gperf ccache dfu-util device-tree-compiler \
+            python3-dev python3-pip python3-setuptools python3-wheel xz-utils file \
+            make gcc-multilib g++-multilib libsdl2-dev
+
+      - name: Set up Python virtual environment
+        run: |
+          python3 -m venv /tmp/zephyr-venv && \
+          source /tmp/zephyr-venv/bin/activate && \
+          pip install -q -r zephyr/scripts/requirements.txt
+
+      - name: Build Zephyr firmware
+        shell: bash
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+        run: |
+          source /tmp/zephyr-venv/bin/activate
+          
+          cd firmware
+          if [ -d build ]; then rm -rf build; fi
+          
+          west init -l .
+          west update
+          west build -d build -b native_sim/native . --pristine=auto
+
+      - name: Copy zephyr.exe to web
+        run: |
+          mkdir -p web
+          if [ ! -f firmware/build/zephyr/zephyr.exe ]; then
+            echo "ERROR: zephyr.exe not found at firmware/build/zephyr/zephyr.exe"
+            ls -la firmware/build/zephyr/ || echo "Build directory does not exist"
+            exit 1
+          fi
+          cp firmware/build/zephyr/zephyr.exe web/zephyr.exe
+          ls -lh web/zephyr.exe
+
+      - name: Upload Zephyr artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zephyr-artifact
+          path: web/zephyr.exe
+          retention-days: 1
+
+  build-metadata:
+    name: Generate build metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate BUILD_INFO.json
+        run: |
+          mkdir -p web
+          cat > web/BUILD_INFO.json <<EOF
+          {
+            "timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref }}",
+            "workflow_run": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          EOF
+
+      - name: Upload metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-metadata
+          path: web/BUILD_INFO.json
+          retention-days: 1
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: [build-v86, build-zephyr, build-metadata]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare GitHub Pages deployment
+        run: |
+          # Copy web directory structure to deployment site
+          mkdir -p _site
+          cp -r web/* _site/ 2>/dev/null || true
+          
+          # Merge all downloaded artifacts into _site
+          for dir in artifacts/*/; do
+            if [ -d "$dir" ]; then
+              cp "$dir"* _site/ 2>/dev/null || true
+            fi
+          done
+          
+          # Verify required files exist
+          echo "=== Deployment Contents ==="
+          ls -lh _site/ | grep -E "\.(bin|xz|exe|json|sha256)$"
+          
+          if [ ! -f _site/v86-bzimage.bin ]; then
+            echo "ERROR: v86-bzimage.bin not found!"
+            exit 1
+          fi
+          if [ ! -f _site/v86-rootfs.cpio.xz ]; then
+            echo "ERROR: v86-rootfs.cpio.xz not found!"
+            exit 1
+          fi
+          if [ ! -f _site/zephyr.exe ]; then
+            echo "ERROR: zephyr.exe not found!"
+            exit 1
+          fi
+          
+          echo "✅ All required artifacts present"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Print deployment summary
+        run: |
+          echo "## ✅ Build Complete and Deployed"
+          echo ""
+          echo "**Artifacts built:**"
+          echo "- 📦 v86-bzimage.bin (Linux kernel)"
+          echo "- 🗂️ v86-rootfs.cpio.xz (root filesystem)"
+          echo "- ⚙️ zephyr.exe (Zephyr native_sim binary)"
+          echo ""
+          echo "**Demo URL:** ${{ steps.deployment.outputs.page_url }}"
+          echo ""
+          echo "The demo should be live and accessible in a few seconds!"
