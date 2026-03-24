@@ -27,6 +27,10 @@ web/node_modules/
 web/zephyr.elf
 web/*.wasm
 
+# Nested/vendor repositories
+modules/
+zephyr/
+
 # Python cache
 __pycache__/
 *.py[cod]
