@@ -31,7 +31,9 @@ jobs:
           mkdir -p web
           
           # Create temporary container and extract files
-          docker create --name v86-temp v86-buildroot:latest
+          # The final image is FROM scratch and has no default CMD, so pass an
+          # explicit command when creating the container.
+          docker create --name v86-temp v86-buildroot:latest /bzImage
           docker cp v86-temp:/bzImage web/v86-bzimage.bin
           docker cp v86-temp:/rootfs.cpio.xz web/v86-rootfs.cpio.xz
           docker rm v86-temp
