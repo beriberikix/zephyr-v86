@@ -89,7 +89,14 @@ west build -b qemu_x86 --pristine=auto
 ### Step 3: Copy Compiled ELF to Web Directory
 
 ```bash
-cp firmware/build/zephyr/zephyr.elf web/
+# from repo root
+cp ./firmware/build/zephyr/zephyr.elf ./web/
+
+# if currently in firmware/
+# cp build/zephyr/zephyr.elf ../web/
+
+# if currently in web/
+# cp ../firmware/build/zephyr/zephyr.elf ./
 ```
 
 This places the Multiboot kernel where the web frontend can load it.
@@ -247,6 +254,18 @@ CONFIG_KERNEL_BIN_NAME=zephyr.elf
 
 **To add more shell commands**, edit `firmware/src/main.c` and use `SHELL_CMD_REGISTER()` macro. Zephyr provides many built-in shell commands; see [Zephyr shell samples](https://github.com/zephyrproject-rtos/zephyr/tree/main/samples/shell).
 
+### Native_sim UART Note
+
+When running a `native_sim` build in containerized or constrained environments, UART PTY allocation may fail with errors like `could not open a new pty for the uart`.
+
+Use stdin/stdout UART routing instead of PTY routing:
+
+```kconfig
+CONFIG_UART_NATIVE_PTY_0_ON_STDINOUT=y
+```
+
+This setting is enabled in `firmware/prj.conf` for this workspace.
+
 ### Web Frontend Setup
 
 #### Required Files
@@ -258,7 +277,7 @@ CONFIG_KERNEL_BIN_NAME=zephyr.elf
 | `web/style.css` | Terminal styling |
 | `web/serve.py` | Development HTTP server with COOP/COEP headers |
 | `web/lib/libv86.js` | v86 JavaScript library (must be downloaded) |
-| `web/lib/libv86.wasm` | v86 WebAssembly module (optional, improves performance) |
+| `web/lib/v86.wasm` | v86 WebAssembly module (required) |
 | `web/zephyr.elf` | Compiled Zephyr kernel (copied from firmware/build/) |
 
 #### Downloading v86 Library
@@ -268,13 +287,15 @@ CONFIG_KERNEL_BIN_NAME=zephyr.elf
 ```bash
 cd web/lib/
 
-# Download the latest v86 build
-wget -O libv86.js https://github.com/copy/v86/releases/download/latest/libv86.js
-wget -O libv86.wasm https://github.com/copy/v86/releases/download/latest/libv86.wasm
+# Download a matching v86 JS + WASM pair
+wget -O libv86.js https://cdn.jsdelivr.net/npm/v86@latest/build/libv86.js
+wget -O v86.wasm https://cdn.jsdelivr.net/npm/v86@latest/build/v86.wasm
+cp v86.wasm v86-fallback.wasm
 
 # Or use curl:
-# curl -Lo libv86.js https://github.com/copy/v86/releases/download/latest/libv86.js
-# curl -Lo libv86.wasm https://github.com/copy/v86/releases/download/latest/libv86.wasm
+# curl -Lo libv86.js https://cdn.jsdelivr.net/npm/v86@latest/build/libv86.js
+# curl -Lo v86.wasm https://cdn.jsdelivr.net/npm/v86@latest/build/v86.wasm
+# cp v86.wasm v86-fallback.wasm
 ```
 
 **Option 2: Build v86 from source**
@@ -283,7 +304,7 @@ wget -O libv86.wasm https://github.com/copy/v86/releases/download/latest/libv86.
 git clone https://github.com/copy/v86.git
 cd v86/
 make
-# Copy build/libv86.js and build/libv86.wasm to zephyr-v86/web/lib/
+# Copy build/libv86.js and build/v86.wasm to zephyr-v86/web/lib/
 ```
 
 **Option 3: Use CDN (not recommended for offline use)**
