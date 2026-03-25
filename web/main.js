@@ -6,6 +6,9 @@ function $(id)
 }
 
 const THEME_STORAGE_KEY = "zephyr-v86-theme-mode";
+const NETWORK_RELAY_STORAGE_KEY = "zephyr-v86-network-relay";
+const DEFAULT_NETWORK_RELAY_URL = "";
+const DEFAULT_NETWORK_NIC_TYPE = "ne2k";
 
 function get_system_theme()
 {
@@ -61,6 +64,94 @@ function init_theme_mode()
         {
             media.addListener(on_change);
         }
+    }
+}
+
+function get_effective_network_relay_url()
+{
+    const input = $("network_relay_url");
+    if(!input)
+    {
+        return "";
+    }
+
+    return input.value.trim();
+}
+
+function set_network_status(text, kind)
+{
+    const chip = $("network_status");
+    if(!chip)
+    {
+        return;
+    }
+
+    chip.textContent = text;
+    chip.classList.remove("chip--live", "chip--muted", "chip--error");
+    if(kind === "error")
+    {
+        chip.classList.add("chip--error");
+    }
+    else if(kind === "live")
+    {
+        chip.classList.add("chip--live");
+    }
+    else
+    {
+        chip.classList.add("chip--muted");
+    }
+}
+
+function init_network_controls()
+{
+    const relay_input = $("network_relay_url");
+    const relay_active = $("network_relay_active");
+    const apply_button = $("network_apply");
+    const disable_button = $("network_disable");
+    if(!relay_input)
+    {
+        return;
+    }
+
+    const saved = localStorage.getItem(NETWORK_RELAY_STORAGE_KEY);
+    const initial = saved === null ? DEFAULT_NETWORK_RELAY_URL : saved;
+    relay_input.value = initial;
+    if(relay_active)
+    {
+        relay_active.textContent = initial || "(disabled)";
+    }
+
+    set_network_status(initial ? "Configured" : "Disabled", initial ? "live" : "muted");
+
+    relay_input.addEventListener("change", function()
+    {
+        const value = this.value.trim();
+        localStorage.setItem(NETWORK_RELAY_STORAGE_KEY, value);
+        if(relay_active)
+        {
+            relay_active.textContent = value || "(disabled)";
+        }
+        set_network_status(value ? "Configured" : "Disabled", value ? "live" : "muted");
+    });
+
+    if(apply_button)
+    {
+        apply_button.onclick = function()
+        {
+            const value = relay_input.value.trim();
+            localStorage.setItem(NETWORK_RELAY_STORAGE_KEY, value);
+            location.reload();
+        };
+    }
+
+    if(disable_button)
+    {
+        disable_button.onclick = function()
+        {
+            relay_input.value = "";
+            localStorage.setItem(NETWORK_RELAY_STORAGE_KEY, "");
+            location.reload();
+        };
     }
 }
 
@@ -363,9 +454,9 @@ async function preflight_assets()
     return { ok: true, missing_optional };
 }
 
-function create_buildroot_settings()
+function create_buildroot_settings(relay_url)
 {
-    return {
+    const settings = {
         wasm_path: "lib/v86.wasm",
         memory_size: 128 * 1024 * 1024,
         vga_memory_size: 8 * 1024 * 1024,
@@ -388,6 +479,31 @@ function create_buildroot_settings()
         filesystem: {},
         cmdline: "tsc=reliable mitigations=off random.trust_cpu=on",
     };
+
+    if(relay_url)
+    {
+        if(relay_url === "fetch" || relay_url.startsWith("fetch://"))
+        {
+            // fetch backend: HTTP-only networking handled in-browser.
+            // No external relay server needed. Supports outbound HTTP
+            // via the browser's fetch() API with optional CORS proxy.
+            settings.net_device = {
+                type: "virtio",
+                relay_url: relay_url,
+            };
+        }
+        else
+        {
+            // wsproxy backend: full ethernet relay via WebSocket.
+            // Requires a running relay server (e.g. RootlessRelay).
+            settings.net_device = {
+                type: DEFAULT_NETWORK_NIC_TYPE,
+                relay_url: relay_url,
+            };
+        }
+    }
+
+    return settings;
 }
 
 function init_filesystem_panel(emulator)
@@ -461,9 +577,17 @@ function init_filesystem_panel(emulator)
             }
             const bytes = new Uint8Array(await response.arrayBuffer());
             await emulator.create_file("/zephyr.exe", bytes);
+            try
+            {
+                await emulator.create_file("/mnt/zephyr.exe", bytes);
+            }
+            catch(mount_err)
+            {
+                console.warn("Could not mirror /mnt/zephyr.exe:", mount_err);
+            }
             console.log("✓ Injected /zephyr.exe (" + bytes.length + " bytes) via 9p");
             $("info_filesystem").style.display = "block";
-            $("info_filesystem_last_file").textContent = "/zephyr.exe";
+            $("info_filesystem_last_file").textContent = "/zephyr.exe (mirrored to /mnt when available)";
             $("info_filesystem_status").textContent = "Auto-injected";
             tab_state.markActivity("files");
         }
@@ -474,7 +598,7 @@ function init_filesystem_panel(emulator)
     })();
 }
 
-function init_runtime(emulator)
+function init_runtime(emulator, relay_url)
 {
     $("loading").style.display = "none";
     $("runtime_options").style.display = "grid";
@@ -484,10 +608,55 @@ function init_runtime(emulator)
 
     init_filesystem_panel(emulator);
 
-    // Note on Phase 4: zephyr.exe is injected via 9p filesystem
-    // To execute it, manually type in the terminal:
-    //   exec zephyr.exe /proc/sysinfo
-    // Auto-send not yet implemented (requires v86 serial API integration)
+    const relay_active = $("network_relay_active");
+    const packets_sent = $("network_packets_sent");
+    const packets_received = $("network_packets_received");
+    let sent_count = 0;
+    let recv_count = 0;
+
+    if(relay_active)
+    {
+        relay_active.textContent = relay_url || "(disabled)";
+    }
+
+    if(relay_url)
+    {
+        set_network_status("Enabled", "live");
+    }
+    else
+    {
+        set_network_status("Disabled", "muted");
+    }
+
+    emulator.add_listener("net0-send", function()
+    {
+        sent_count++;
+        if(packets_sent)
+        {
+            packets_sent.textContent = String(sent_count);
+        }
+        if(relay_url)
+        {
+            set_network_status("Traffic", "live");
+        }
+    });
+
+    emulator.add_listener("net0-receive", function()
+    {
+        recv_count++;
+        if(packets_received)
+        {
+            packets_received.textContent = String(recv_count);
+        }
+        if(relay_url)
+        {
+            set_network_status("Traffic", "live");
+        }
+    });
+
+    // zephyr.exe is injected via 9p filesystem.
+    // Start it manually in the guest shell with:
+    //   exec zephyr.exe
 
     $("run").onclick = async function()
     {
@@ -655,6 +824,17 @@ function init_runtime(emulator)
 async function start_buildroot()
 {
     set_status("Starting", "muted");
+    const relay_url = get_effective_network_relay_url();
+
+    if(relay_url)
+    {
+        set_network_status("Connecting", "muted");
+    }
+    else
+    {
+        set_network_status("Disabled", "muted");
+    }
+
     const preflight = await preflight_assets();
     if(!preflight.ok)
     {
@@ -663,7 +843,7 @@ async function start_buildroot()
 
     $("boot_options").style.display = "none";
 
-    const emulator = new V86(create_buildroot_settings());
+    const emulator = new V86(create_buildroot_settings(relay_url));
     window.emulator = emulator;
 
     emulator.add_listener("download-progress", show_progress);
@@ -674,6 +854,10 @@ async function start_buildroot()
         loading.style.display = "block";
         loading.textContent = "Loading failed: " + e.file_name;
         set_status("Download failed", "error");
+        if(relay_url)
+        {
+            set_network_status("Relay issue", "error");
+        }
     });
 
     emulator.add_listener("emulator-ready", function()
@@ -681,7 +865,7 @@ async function start_buildroot()
         // xterm.js is already loaded as a static script in index.html
         emulator.set_serial_container_xtermjs($("terminal"));
         set_status("Ready", "live");
-        init_runtime(emulator);
+        init_runtime(emulator, relay_url);
     });
 }
 
@@ -689,6 +873,7 @@ window.addEventListener("load", function()
 {
     init_theme_mode();
     init_serial_accordion();
+    init_network_controls();
     window.ui_tabs = init_utility_tabs();
 
     $("start_emulation").onclick = function(e)

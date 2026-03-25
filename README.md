@@ -107,11 +107,54 @@ Once booted:
 
 1. Wait for Buildroot shell prompt
 2. `zephyr.exe` is auto-injected by `web/main.js`
-3. Execute from terminal, for example:
+3. Start the Zephyr networking app:
 
 ```bash
-exec zephyr.exe /proc/sysinfo
+exec /zephyr.exe
 ```
+
+If you also uploaded a file through the Files panel, avoid running `/mnt/zephyr.exe` unless you intentionally want that uploaded copy. `/mnt/zephyr.exe` may be stale from an earlier build.
+
+The app runs a TCP connect test on port `4242` and exits immediately after the first successful client connection.
+
+Quick test inside the guest shell:
+
+```bash
+./zephyr.exe
+```
+
+On startup, the app prints:
+
+```text
+Build marker: tcp-test-v1
+TCP test listening on 0.0.0.0:4242
+Waiting for first client connection...
+```
+
+When a client connects, the app reports success and exits. This makes `time ./zephyr.exe` directly measure time-to-first-successful TCP connection.
+
+Use `udhcpc` first if needed so guest routing is configured through the relay path.
+
+From another network endpoint, connect to the guest at port `4242`. If your rootfs includes a netcat applet, one local check is:
+
+```bash
+busybox nc 127.0.0.1 4242
+```
+
+## Networking Configuration
+
+- The web runtime enables v86 networking with `wsproxy` when the **Networking proxy** field is non-empty.
+- Default relay URL: `wss://relay.widgetry.org/`.
+- You can override this in the Controls tab and click **Apply + Reload**.
+- Click **Disable Network** to boot without a relay.
+- The Zephyr `native_sim` app uses offloaded sockets in this flow.
+
+Why `wsproxy` for phase 1:
+
+- It is the best fit for Zephyr socket-style app behavior in this runtime.
+- v86 `wisp` and `fetch` backends are useful for specific scenarios but more limited for this target flow.
+
+Note: the public relay is a convenience endpoint and may be bandwidth-limited. Plan to switch this URL to your own relay infrastructure for production.
 
 ## Important Zephyr Configuration
 
@@ -138,7 +181,7 @@ The web UI is organized around the serial terminal as the primary workspace.
 - Center stage:
   - VGA/screen frame (`#screen_container`) and the main serial terminal (`#terminal`)
 - Right utility rail (tabs):
-  - **Controls**: Run, Reset, Exit
+  - **Controls**: networking relay settings, Run, Reset, Exit
   - **Files**: Upload/download controls + 9p stats/status
   - **Metrics**: Running time, current speed, average speed
   - **Session**: Save State / Load State
@@ -175,6 +218,12 @@ cp build/zephyr/zephyr.exe web/zephyr.exe
 
 - Confirm `web/zephyr.exe` exists.
 - Reload the page and watch browser console for auto-injection logs from `main.js`.
+
+### Networking does not work
+
+- Confirm the **Networking proxy** field points to a reachable `ws://` or `wss://` relay endpoint.
+- If using the public relay, retry later if service is saturated.
+- To run with your own relay later, replace the URL in the Controls tab and reload.
 
 ## References
 
