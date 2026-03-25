@@ -70,6 +70,37 @@
             <section id="tab_controls" class="tab-panel is-active" role="tabpanel" aria-labelledby="tab_trigger_controls">
                 <h3>Runtime Controls</h3>
                 <p class="panel-help">Core VM operations for execution flow.</p>
+                <div class="stack">
+                    <label>
+                        Networking proxy
+                        <input type="text" id="network_relay_url" placeholder="ws://localhost:8086/  (run ./tools/run-relay.sh)">
+                    </label>
+                    <div class="controls-grid">
+                        <button id="network_apply" class="btn" type="button">Apply + Reload</button>
+                        <button id="network_disable" class="btn" type="button">Disable Network</button>
+                    </div>
+                </div>
+                <div id="network_info" class="metric-card">
+                    <div class="metric-card__title-row">
+                        <strong>Network</strong>
+                        <span id="network_status" class="chip chip--muted">Pending</span>
+                    </div>
+                    <div class="metric-row metric-row--stacked">
+                        <span>Relay URL</span>
+                        <strong id="network_relay_active">-</strong>
+                    </div>
+                    <div class="metric-row">
+                        <span title="WebSocket connection to relay (emulator layer)">WS Frames sent</span>
+                        <strong id="network_packets_sent">0</strong>
+                    </div>
+                    <div class="metric-row">
+                        <span title="WebSocket connection to relay (emulator layer)">WS Frames received</span>
+                        <strong id="network_packets_received">0</strong>
+                    </div>
+                    <div class="help-text" style="margin-top: 8px; font-size: 12px; color: var(--color-text-muted); line-height: 1.4;">
+                        ℹ️ WS frames track the emulator↔relay connection. Guest network traffic is monitored separately in the relay server logs.
+                    </div>
+                </div>
                 <div id="runtime_options" class="controls-grid" style="display: none">
                     <button id="run" class="btn btn--primary">Pause</button>
                     <button id="reset" class="btn">Reset</button>
