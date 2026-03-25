@@ -38,6 +38,9 @@ web/*.sha256
 modules/
 zephyr/
 
+# west configuration directory
+.west/
+
 # RootlessRelay local clone
 .relay/
 
