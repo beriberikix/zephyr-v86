@@ -17,7 +17,7 @@ Instead, it boots a Linux guest (Buildroot) inside v86, then injects and runs a 
   - Applies network relay config (`net_device.relay_url`) from the Controls tab
   - Initializes xterm serial console
   - Enables 9p file upload/download panel
-  - Auto-injects `/zephyr.exe` into the guest filesystem
+  - Auto-injects `zephyr.exe` into the 9p share (guest path `/mnt/zephyr.exe`, executable)
 - `firmware/prj.conf`
   - Configures Zephyr `native_sim` runtime behavior
   - Uses stdin/stdout UART routing via:
@@ -33,7 +33,7 @@ Instead, it boots a Linux guest (Buildroot) inside v86, then injects and runs a 
    - firmware: `web/lib/seabios.bin`, `web/lib/vgabios.bin`
 4. v86 emits `emulator-ready`
 5. `set_serial_container_xtermjs(...)` connects guest serial to xterm
-6. Filesystem panel is enabled and `/zephyr.exe` is injected automatically
+6. Filesystem panel is enabled and `/mnt/zephyr.exe` is injected automatically
 
 ## Networking Path
 
@@ -120,7 +120,7 @@ route -n
 wget -O /dev/null http://example.com
 
 # 4. If wget works, run the Zephyr test
-./zephyr.exe
+/mnt/zephyr.exe
 ```
 
 If step 3 fails but step 1 succeeded, the relay server is not forwarding
@@ -130,9 +130,9 @@ traffic.  If step 1 fails, the relay URL may be wrong or the relay is down.
 
 - Zephyr app source lives under `firmware/`
 - Built output used for injection is `web/zephyr.exe`
-- Inside guest, it appears as `/zephyr.exe`
+- Inside guest, it appears as `/mnt/zephyr.exe` (the 9p share, mounted by the image's `/etc/fstab`)
 - Typical manual invocation in guest terminal:
-  - `exec zephyr.exe`
+  - `/mnt/zephyr.exe`
 
 Current app behavior:
 

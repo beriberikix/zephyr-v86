@@ -30,7 +30,7 @@ The demo is hosted on GitHub Pages and automatically updated when you trigger a 
 Current runtime path:
 
 1. Browser boots Buildroot (`v86-bzimage.bin` + `v86-rootfs.cpio.xz`)
-2. Web runtime auto-injects `zephyr.exe` into guest filesystem (`/zephyr.exe`)
+2. Web runtime auto-injects `zephyr.exe` into the guest's 9p share (`/mnt/zephyr.exe`, executable)
 3. You run the binary from the guest terminal
 
 ## Current Architecture
@@ -106,21 +106,25 @@ http://127.0.0.1:8000/
 Once booted:
 
 1. Wait for Buildroot shell prompt
-2. `zephyr.exe` is auto-injected by `web/main.js`
-3. Start the Zephyr networking app:
+2. `zephyr.exe` is auto-injected by `web/main.js` into the 9p share, which the guest
+   mounts at `/mnt`, with the execute bit set
+3. Get an address from the relay, then start the Zephyr networking app:
 
 ```bash
-exec /zephyr.exe
+udhcpc
+/mnt/zephyr.exe
 ```
 
-If you also uploaded a file through the Files panel, avoid running `/mnt/zephyr.exe` unless you intentionally want that uploaded copy. `/mnt/zephyr.exe` may be stale from an earlier build.
+Files uploaded through the Files panel also land in `/mnt`. ELF binaries, scripts and
+`.exe` files are marked executable; uploading a file named `zephyr.exe` replaces the
+auto-injected one.
 
 The app runs a TCP connect test on port `4242` and exits immediately after the first successful client connection.
 
 Quick test inside the guest shell:
 
 ```bash
-./zephyr.exe
+/mnt/zephyr.exe
 ```
 
 On startup, the app prints:
@@ -131,7 +135,7 @@ TCP test listening on 0.0.0.0:4242
 Waiting for first client connection...
 ```
 
-When a client connects, the app reports success and exits. This makes `time ./zephyr.exe` directly measure time-to-first-successful TCP connection.
+When a client connects, the app reports success and exits. This makes `time /mnt/zephyr.exe` directly measure time-to-first-successful TCP connection.
 
 Use `udhcpc` first if needed so guest routing is configured through the relay path.
 

@@ -133,6 +133,17 @@ function relay_http_origin(relay_url)
 // pass subprotocols, which is the only channel a browser has for a token.
 // Wrap the global constructor so sockets to the relay host carry
 // ["relay.v1", "relay.token.<token>"]; everything else is untouched.
+const relay_socket_stats = { sent: 0, received: 0, onchange: null };
+
+function bump_relay_stat(key)
+{
+    relay_socket_stats[key]++;
+    if(relay_socket_stats.onchange)
+    {
+        relay_socket_stats.onchange();
+    }
+}
+
 function install_relay_token_shim(relay_url, token)
 {
     const Native = window.WebSocket;
@@ -152,11 +163,25 @@ function install_relay_token_shim(relay_url, token)
         {
             target = null;
         }
-        if(!target || target.host !== relay_host || !token)
+        if(!target || target.host !== relay_host)
         {
             return protocols === undefined ? new Native(url) : new Native(url, protocols);
         }
-        const socket = new Native(url, ["relay.v1", "relay.token." + token]);
+        // Without a token (local relay in default mode) open it unchanged but
+        // still count frames.
+        const socket = token
+            ? new Native(url, ["relay.v1", "relay.token." + token])
+            : new Native(url);
+        const native_send = socket.send.bind(socket);
+        socket.send = function(data)
+        {
+            bump_relay_stat("sent");
+            return native_send(data);
+        };
+        socket.addEventListener("message", function()
+        {
+            bump_relay_stat("received");
+        });
         let opened = false;
         socket.addEventListener("open", function()
         {
@@ -743,6 +768,32 @@ function create_buildroot_settings(relay_url)
     return settings;
 }
 
+// The emulator's 9p share is mounted at /mnt in the guest (see the image's
+// /etc/fstab). create_file() gives new files mode 0644, so native_sim binaries
+// would fail with "Permission denied"; set the execute bits on the inode.
+async function create_guest_file(emulator, name, bytes, executable)
+{
+    await emulator.create_file("/" + name, bytes);
+    if(!executable)
+    {
+        return;
+    }
+    const fs = emulator.fs9p;
+    const found = fs && fs.SearchPath ? fs.SearchPath("/" + name) : null;
+    if(found && found.id !== -1 && fs.inodes && fs.inodes[found.id])
+    {
+        fs.inodes[found.id].mode = 0o100755;
+    }
+}
+
+function looks_executable(name, bytes)
+{
+    // ELF magic, a shebang, or a .exe name.
+    const elf = bytes.length > 3 && bytes[0] === 0x7f && bytes[1] === 0x45 && bytes[2] === 0x4c && bytes[3] === 0x46;
+    const shebang = bytes.length > 1 && bytes[0] === 0x23 && bytes[1] === 0x21;
+    return elf || shebang || /\.exe$/i.test(name);
+}
+
 function init_filesystem_panel(emulator)
 {
     $("filesystem_panel").style.display = "grid";
@@ -754,9 +805,9 @@ function init_filesystem_panel(emulator)
         for(const file of files)
         {
             const bytes = new Uint8Array(await read_file(file));
-            await emulator.create_file("/" + file.name, bytes);
+            await create_guest_file(emulator, file.name, bytes, looks_executable(file.name, bytes));
             $("info_filesystem").style.display = "block";
-            $("info_filesystem_last_file").textContent = "/" + file.name;
+            $("info_filesystem_last_file").textContent = "/mnt/" + file.name;
             $("info_filesystem_status").textContent = "Uploaded";
             set_status("File uploaded", "muted");
             tab_state.markActivity("files");
@@ -813,18 +864,10 @@ function init_filesystem_panel(emulator)
                 return;
             }
             const bytes = new Uint8Array(await response.arrayBuffer());
-            await emulator.create_file("/zephyr.exe", bytes);
-            try
-            {
-                await emulator.create_file("/mnt/zephyr.exe", bytes);
-            }
-            catch(mount_err)
-            {
-                console.warn("Could not mirror /mnt/zephyr.exe:", mount_err);
-            }
-            console.log("✓ Injected /zephyr.exe (" + bytes.length + " bytes) via 9p");
+            await create_guest_file(emulator, "zephyr.exe", bytes, true);
+            console.log("✓ Injected /mnt/zephyr.exe (" + bytes.length + " bytes, executable) via 9p");
             $("info_filesystem").style.display = "block";
-            $("info_filesystem_last_file").textContent = "/zephyr.exe (mirrored to /mnt when available)";
+            $("info_filesystem_last_file").textContent = "/mnt/zephyr.exe (run it from the guest shell)";
             $("info_filesystem_status").textContent = "Auto-injected";
             tab_state.markActivity("files");
         }
@@ -856,44 +899,46 @@ function init_runtime(emulator, relay_url)
         relay_active.textContent = relay_url || "(disabled)";
     }
 
-    if(relay_url)
+    const status_chip = $("network_status");
+    const relay_error_shown = status_chip && status_chip.classList.contains("chip--error");
+    if(relay_url && !relay_error_shown)
     {
+        // Keep a refusal reported by the socket shim visible instead of
+        // overwriting it once the emulator is ready.
         set_network_status("Enabled", "live");
     }
-    else
+    else if(!relay_url)
     {
         set_network_status("Disabled", "muted");
     }
 
-    emulator.add_listener("net0-send", function()
+    // Frame counts come from the relay WebSocket itself (see
+    // install_relay_token_shim). v86's "net0-receive" event travels to the
+    // emulator side of its bus, so a page listener would never see it.
+    let traffic_shown = false;
+    relay_socket_stats.onchange = function()
     {
-        sent_count++;
+        sent_count = relay_socket_stats.sent;
+        recv_count = relay_socket_stats.received;
         if(packets_sent)
         {
             packets_sent.textContent = String(sent_count);
         }
-        if(relay_url)
-        {
-            set_network_status("Traffic", "live");
-        }
-    });
-
-    emulator.add_listener("net0-receive", function()
-    {
-        recv_count++;
         if(packets_received)
         {
             packets_received.textContent = String(recv_count);
         }
-        if(relay_url)
+        if(relay_url && !traffic_shown && sent_count > 0 && recv_count > 0)
         {
+            traffic_shown = true;
             set_network_status("Traffic", "live");
         }
-    });
+    };
+    relay_socket_stats.onchange();
 
-    // zephyr.exe is injected via 9p filesystem.
-    // Start it manually in the guest shell with:
-    //   exec zephyr.exe
+    // zephyr.exe is injected into the 9p share, mounted at /mnt in the guest.
+    // Start it from the guest shell with:
+    //   udhcpc && /mnt/zephyr.exe
 
     $("run").onclick = async function()
     {
@@ -1066,17 +1111,11 @@ async function start_buildroot()
 
     if(relay_url)
     {
-        if(relay_token)
-        {
-            install_relay_token_shim(relay_url, relay_token);
-            set_network_status("Connecting", "muted");
-        }
-        else
-        {
-            // Local relays in the default mode accept this; the hosted relay
-            // will refuse the socket and the status chip will say so.
-            set_network_status("Connecting (no token)", "muted");
-        }
+        // Always wrap: adds the token when there is one and counts frames.
+        // Without a token, local relays in the default mode still accept the
+        // socket; the hosted relay refuses it and the status chip says so.
+        install_relay_token_shim(relay_url, relay_token);
+        set_network_status(relay_token ? "Connecting" : "Connecting (no token)", "muted");
     }
     else
     {
