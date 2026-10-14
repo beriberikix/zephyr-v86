@@ -152,8 +152,7 @@ busybox nc 127.0.0.1 4242
   [rootlessRelay](https://github.com/beriberikix/rootlessRelay) that requires a token:
   - **API token**: sign in at <https://relaynet.network>, create a token, paste it into
     **Relay token**, click **Apply + Reload**. Account tier limits apply.
-  - **Demo token**: leave the token field empty and click **Get demo token**. A Cloudflare
-    Turnstile check issues a 15-minute anonymous token (ports 80/443 only, one session).
+  - relaynet is in an invite-only beta; there is no anonymous access.
 - v86 cannot pass WebSocket subprotocols itself, so `main.js` wraps `WebSocket` for the
   relay host and adds `relay.v1` plus `relay.token.<token>`; other sockets are untouched.
 - A local relay (`./tools/run-relay.sh`, `ws://localhost:8086/`) runs in rootlessRelay's

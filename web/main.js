@@ -8,13 +8,10 @@ function $(id)
 const THEME_STORAGE_KEY = "zephyr-v86-theme-mode";
 const NETWORK_RELAY_STORAGE_KEY = "zephyr-v86-network-relay";
 const NETWORK_TOKEN_STORAGE_KEY = "zephyr-v86-network-token";
-const NETWORK_DEMO_TOKEN_STORAGE_KEY = "zephyr-v86-network-demo-token";
 // Hosted relaynet relay (rootlessRelay in hosted mode). It requires a token:
-// an API token from https://relaynet.network, or a short-lived demo token
-// issued after a Turnstile check. Local relays in the default mode need none.
+// an API token from https://relaynet.network. Local relays in the default
+// mode need none.
 const DEFAULT_NETWORK_RELAY_URL = "wss://relay.relaynet.network/";
-const RELAYNET_TURNSTILE_SITE_KEY = "0x4AAAAAAFW5Y8RGhjrzmHGg";
-const TURNSTILE_SCRIPT_URL = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 const DEFAULT_NETWORK_NIC_TYPE = "ne2k";
 
 function get_system_theme()
@@ -85,48 +82,10 @@ function get_effective_network_relay_url()
     return input.value.trim();
 }
 
-// Token precedence: the explicit token field, then an unexpired demo token.
 function get_effective_network_token()
 {
     const input = $("network_relay_token");
-    const explicit = input ? input.value.trim() : "";
-    if(explicit)
-    {
-        return explicit;
-    }
-    const demo = get_demo_token();
-    return demo ? demo.token : "";
-}
-
-function get_demo_token()
-{
-    try
-    {
-        const raw = sessionStorage.getItem(NETWORK_DEMO_TOKEN_STORAGE_KEY);
-        if(!raw)
-        {
-            return null;
-        }
-        const parsed = JSON.parse(raw);
-        if(!parsed.token || !parsed.expiresAt || new Date(parsed.expiresAt).getTime() <= Date.now() + 30000)
-        {
-            sessionStorage.removeItem(NETWORK_DEMO_TOKEN_STORAGE_KEY);
-            return null;
-        }
-        return parsed;
-    }
-    catch(e)
-    {
-        return null;
-    }
-}
-
-// HTTP origin of the relay, for its token endpoint (wss://host/ -> https://host).
-function relay_http_origin(relay_url)
-{
-    const url = new URL(relay_url, location.href);
-    url.protocol = url.protocol === "ws:" ? "http:" : "https:";
-    return url.origin;
+    return input ? input.value.trim() : "";
 }
 
 // v86 opens the relay socket itself with `new WebSocket(url)` and no way to
@@ -217,23 +176,6 @@ function install_relay_token_shim(relay_url, token)
     window.WebSocket = Shim;
 }
 
-function load_turnstile()
-{
-    if(window.turnstile)
-    {
-        return Promise.resolve(window.turnstile);
-    }
-    return new Promise(function(resolve, reject)
-    {
-        const script = document.createElement("script");
-        script.src = TURNSTILE_SCRIPT_URL;
-        script.async = true;
-        script.onload = function() { resolve(window.turnstile); };
-        script.onerror = function() { reject(new Error("could not load the Turnstile script")); };
-        document.head.appendChild(script);
-    });
-}
-
 function set_token_status(text, kind)
 {
     const node = $("network_token_status");
@@ -243,64 +185,6 @@ function set_token_status(text, kind)
     }
     node.textContent = text;
     node.classList.toggle("is-error", kind === "error");
-}
-
-// Demo token flow: render the Turnstile widget, trade its pass for a
-// short-lived anonymous relay token, keep it for this tab, reload to apply.
-async function request_demo_token(relay_url)
-{
-    const container = $("network_turnstile");
-    if(!container)
-    {
-        return;
-    }
-    set_token_status("Complete the check below to get a demo token.", "info");
-    let turnstile;
-    try
-    {
-        turnstile = await load_turnstile();
-    }
-    catch(error)
-    {
-        set_token_status(error.message, "error");
-        return;
-    }
-    container.innerHTML = "";
-    container.style.display = "block";
-    turnstile.render(container, {
-        sitekey: RELAYNET_TURNSTILE_SITE_KEY,
-        callback: async function(turnstile_token)
-        {
-            set_token_status("Requesting demo token...", "info");
-            try
-            {
-                const response = await fetch(relay_http_origin(relay_url) + "/api/anon/token", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ turnstileToken: turnstile_token }),
-                });
-                const body = await response.json().catch(function() { return {}; });
-                if(!response.ok)
-                {
-                    throw new Error(body.error || ("relay answered " + response.status));
-                }
-                sessionStorage.setItem(NETWORK_DEMO_TOKEN_STORAGE_KEY, JSON.stringify({
-                    token: body.token,
-                    expiresAt: body.expiresAt,
-                }));
-                set_token_status("Demo token ready (expires " + new Date(body.expiresAt).toLocaleTimeString() + "). Reloading...", "info");
-                setTimeout(function() { location.reload(); }, 800);
-            }
-            catch(error)
-            {
-                set_token_status("Demo token failed: " + error.message, "error");
-            }
-        },
-        "error-callback": function()
-        {
-            set_token_status("The check failed; try again.", "error");
-        },
-    });
 }
 
 function set_network_status(text, kind)
@@ -334,7 +218,6 @@ function init_network_controls()
     const apply_button = $("network_apply");
     const disable_button = $("network_disable");
     const token_input = $("network_relay_token");
-    const demo_button = $("network_demo_token");
     if(!relay_input)
     {
         return;
@@ -347,28 +230,14 @@ function init_network_controls()
         {
             localStorage.setItem(NETWORK_TOKEN_STORAGE_KEY, this.value.trim());
         });
-        const demo = get_demo_token();
         if(token_input.value)
         {
             set_token_status("Using the saved API token.", "info");
         }
-        else if(demo)
-        {
-            set_token_status("Using a demo token (expires " + new Date(demo.expiresAt).toLocaleTimeString() + ").", "info");
-        }
         else
         {
-            set_token_status("No token: paste an API token from relaynet.network or get a demo token.", "info");
+            set_token_status("No token: paste an API token from relaynet.network.", "info");
         }
-    }
-
-    if(demo_button)
-    {
-        demo_button.onclick = function()
-        {
-            const relay_url = relay_input.value.trim() || DEFAULT_NETWORK_RELAY_URL;
-            void request_demo_token(relay_url);
-        };
     }
 
     const saved = localStorage.getItem(NETWORK_RELAY_STORAGE_KEY);
