@@ -7,7 +7,14 @@ function $(id)
 
 const THEME_STORAGE_KEY = "zephyr-v86-theme-mode";
 const NETWORK_RELAY_STORAGE_KEY = "zephyr-v86-network-relay";
-const DEFAULT_NETWORK_RELAY_URL = "";
+const NETWORK_TOKEN_STORAGE_KEY = "zephyr-v86-network-token";
+const NETWORK_DEMO_TOKEN_STORAGE_KEY = "zephyr-v86-network-demo-token";
+// Hosted relaynet relay (rootlessRelay in hosted mode). It requires a token:
+// an API token from https://relaynet.network, or a short-lived demo token
+// issued after a Turnstile check. Local relays in the default mode need none.
+const DEFAULT_NETWORK_RELAY_URL = "wss://relay.relaynet.network/";
+const RELAYNET_TURNSTILE_SITE_KEY = "0x4AAAAAAFW5Y8RGhjrzmHGg";
+const TURNSTILE_SCRIPT_URL = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 const DEFAULT_NETWORK_NIC_TYPE = "ne2k";
 
 function get_system_theme()
@@ -78,6 +85,199 @@ function get_effective_network_relay_url()
     return input.value.trim();
 }
 
+// Token precedence: the explicit token field, then an unexpired demo token.
+function get_effective_network_token()
+{
+    const input = $("network_relay_token");
+    const explicit = input ? input.value.trim() : "";
+    if(explicit)
+    {
+        return explicit;
+    }
+    const demo = get_demo_token();
+    return demo ? demo.token : "";
+}
+
+function get_demo_token()
+{
+    try
+    {
+        const raw = sessionStorage.getItem(NETWORK_DEMO_TOKEN_STORAGE_KEY);
+        if(!raw)
+        {
+            return null;
+        }
+        const parsed = JSON.parse(raw);
+        if(!parsed.token || !parsed.expiresAt || new Date(parsed.expiresAt).getTime() <= Date.now() + 30000)
+        {
+            sessionStorage.removeItem(NETWORK_DEMO_TOKEN_STORAGE_KEY);
+            return null;
+        }
+        return parsed;
+    }
+    catch(e)
+    {
+        return null;
+    }
+}
+
+// HTTP origin of the relay, for its token endpoint (wss://host/ -> https://host).
+function relay_http_origin(relay_url)
+{
+    const url = new URL(relay_url, location.href);
+    url.protocol = url.protocol === "ws:" ? "http:" : "https:";
+    return url.origin;
+}
+
+// v86 opens the relay socket itself with `new WebSocket(url)` and no way to
+// pass subprotocols, which is the only channel a browser has for a token.
+// Wrap the global constructor so sockets to the relay host carry
+// ["relay.v1", "relay.token.<token>"]; everything else is untouched.
+function install_relay_token_shim(relay_url, token)
+{
+    const Native = window.WebSocket;
+    if(!Native || Native.__relay_shim)
+    {
+        return;
+    }
+    const relay_host = new URL(relay_url, location.href).host;
+    const Shim = function(url, protocols)
+    {
+        let target = null;
+        try
+        {
+            target = new URL(String(url), location.href);
+        }
+        catch(e)
+        {
+            target = null;
+        }
+        if(!target || target.host !== relay_host || !token)
+        {
+            return protocols === undefined ? new Native(url) : new Native(url, protocols);
+        }
+        const socket = new Native(url, ["relay.v1", "relay.token." + token]);
+        let opened = false;
+        socket.addEventListener("open", function()
+        {
+            opened = true;
+            set_network_status("Connected", "live");
+        });
+        socket.addEventListener("close", function(event)
+        {
+            if(!opened)
+            {
+                // Rejected before the handshake completed: almost always 401/403
+                // from the relay (missing, expired or revoked token) or a
+                // disallowed page origin.
+                set_network_status("Relay refused connection (check token)", "error");
+            }
+            else if(event.code === 1008)
+            {
+                set_network_status("Session closed by relay: " + (event.reason || "policy"), "error");
+            }
+            else if(event.code === 1001)
+            {
+                set_network_status("Relay restarting", "muted");
+            }
+        });
+        return socket;
+    };
+    Shim.prototype = Native.prototype;
+    for(const key of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"])
+    {
+        Shim[key] = Native[key];
+    }
+    Shim.__relay_shim = true;
+    window.WebSocket = Shim;
+}
+
+function load_turnstile()
+{
+    if(window.turnstile)
+    {
+        return Promise.resolve(window.turnstile);
+    }
+    return new Promise(function(resolve, reject)
+    {
+        const script = document.createElement("script");
+        script.src = TURNSTILE_SCRIPT_URL;
+        script.async = true;
+        script.onload = function() { resolve(window.turnstile); };
+        script.onerror = function() { reject(new Error("could not load the Turnstile script")); };
+        document.head.appendChild(script);
+    });
+}
+
+function set_token_status(text, kind)
+{
+    const node = $("network_token_status");
+    if(!node)
+    {
+        return;
+    }
+    node.textContent = text;
+    node.classList.toggle("is-error", kind === "error");
+}
+
+// Demo token flow: render the Turnstile widget, trade its pass for a
+// short-lived anonymous relay token, keep it for this tab, reload to apply.
+async function request_demo_token(relay_url)
+{
+    const container = $("network_turnstile");
+    if(!container)
+    {
+        return;
+    }
+    set_token_status("Complete the check below to get a demo token.", "info");
+    let turnstile;
+    try
+    {
+        turnstile = await load_turnstile();
+    }
+    catch(error)
+    {
+        set_token_status(error.message, "error");
+        return;
+    }
+    container.innerHTML = "";
+    container.style.display = "block";
+    turnstile.render(container, {
+        sitekey: RELAYNET_TURNSTILE_SITE_KEY,
+        callback: async function(turnstile_token)
+        {
+            set_token_status("Requesting demo token...", "info");
+            try
+            {
+                const response = await fetch(relay_http_origin(relay_url) + "/api/anon/token", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ turnstileToken: turnstile_token }),
+                });
+                const body = await response.json().catch(function() { return {}; });
+                if(!response.ok)
+                {
+                    throw new Error(body.error || ("relay answered " + response.status));
+                }
+                sessionStorage.setItem(NETWORK_DEMO_TOKEN_STORAGE_KEY, JSON.stringify({
+                    token: body.token,
+                    expiresAt: body.expiresAt,
+                }));
+                set_token_status("Demo token ready (expires " + new Date(body.expiresAt).toLocaleTimeString() + "). Reloading...", "info");
+                setTimeout(function() { location.reload(); }, 800);
+            }
+            catch(error)
+            {
+                set_token_status("Demo token failed: " + error.message, "error");
+            }
+        },
+        "error-callback": function()
+        {
+            set_token_status("The check failed; try again.", "error");
+        },
+    });
+}
+
 function set_network_status(text, kind)
 {
     const chip = $("network_status");
@@ -108,9 +308,42 @@ function init_network_controls()
     const relay_active = $("network_relay_active");
     const apply_button = $("network_apply");
     const disable_button = $("network_disable");
+    const token_input = $("network_relay_token");
+    const demo_button = $("network_demo_token");
     if(!relay_input)
     {
         return;
+    }
+
+    if(token_input)
+    {
+        token_input.value = localStorage.getItem(NETWORK_TOKEN_STORAGE_KEY) || "";
+        token_input.addEventListener("change", function()
+        {
+            localStorage.setItem(NETWORK_TOKEN_STORAGE_KEY, this.value.trim());
+        });
+        const demo = get_demo_token();
+        if(token_input.value)
+        {
+            set_token_status("Using the saved API token.", "info");
+        }
+        else if(demo)
+        {
+            set_token_status("Using a demo token (expires " + new Date(demo.expiresAt).toLocaleTimeString() + ").", "info");
+        }
+        else
+        {
+            set_token_status("No token: paste an API token from relaynet.network or get a demo token.", "info");
+        }
+    }
+
+    if(demo_button)
+    {
+        demo_button.onclick = function()
+        {
+            const relay_url = relay_input.value.trim() || DEFAULT_NETWORK_RELAY_URL;
+            void request_demo_token(relay_url);
+        };
     }
 
     const saved = localStorage.getItem(NETWORK_RELAY_STORAGE_KEY);
@@ -140,6 +373,10 @@ function init_network_controls()
         {
             const value = relay_input.value.trim();
             localStorage.setItem(NETWORK_RELAY_STORAGE_KEY, value);
+            if(token_input)
+            {
+                localStorage.setItem(NETWORK_TOKEN_STORAGE_KEY, token_input.value.trim());
+            }
             location.reload();
         };
     }
@@ -825,10 +1062,21 @@ async function start_buildroot()
 {
     set_status("Starting", "muted");
     const relay_url = get_effective_network_relay_url();
+    const relay_token = relay_url ? get_effective_network_token() : "";
 
     if(relay_url)
     {
-        set_network_status("Connecting", "muted");
+        if(relay_token)
+        {
+            install_relay_token_shim(relay_url, relay_token);
+            set_network_status("Connecting", "muted");
+        }
+        else
+        {
+            // Local relays in the default mode accept this; the hosted relay
+            // will refuse the socket and the status chip will say so.
+            set_network_status("Connecting (no token)", "muted");
+        }
     }
     else
     {

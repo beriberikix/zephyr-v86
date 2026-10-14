@@ -73,10 +73,17 @@
                 <div class="stack">
                     <label>
                         Networking proxy
-                        <input type="text" id="network_relay_url" placeholder="ws://localhost:8086/  (run ./tools/run-relay.sh)">
+                        <input type="text" id="network_relay_url" placeholder="wss://relay.relaynet.network/ or ws://localhost:8086/">
                     </label>
+                    <label>
+                        Relay token
+                        <input type="text" id="network_relay_token" placeholder="rr_… from relaynet.network (leave empty for a demo token)" autocomplete="off" spellcheck="false">
+                    </label>
+                    <div id="network_token_status" class="help-text"></div>
+                    <div id="network_turnstile" style="display: none; margin: 6px 0;"></div>
                     <div class="controls-grid">
                         <button id="network_apply" class="btn" type="button">Apply + Reload</button>
+                        <button id="network_demo_token" class="btn" type="button">Get demo token</button>
                         <button id="network_disable" class="btn" type="button">Disable Network</button>
                     </div>
                 </div>

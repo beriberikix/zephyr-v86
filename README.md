@@ -144,8 +144,17 @@ busybox nc 127.0.0.1 4242
 ## Networking Configuration
 
 - The web runtime enables v86 networking with `wsproxy` when the **Networking proxy** field is non-empty.
-- Default relay URL: `wss://relay.widgetry.org/`.
-- You can override this in the Controls tab and click **Apply + Reload**.
+- Default relay URL: `wss://relay.relaynet.network/`, a hosted
+  [rootlessRelay](https://github.com/beriberikix/rootlessRelay) that requires a token:
+  - **API token**: sign in at <https://relaynet.network>, create a token, paste it into
+    **Relay token**, click **Apply + Reload**. Account tier limits apply.
+  - **Demo token**: leave the token field empty and click **Get demo token**. A Cloudflare
+    Turnstile check issues a 15-minute anonymous token (ports 80/443 only, one session).
+- v86 cannot pass WebSocket subprotocols itself, so `main.js` wraps `WebSocket` for the
+  relay host and adds `relay.v1` plus `relay.token.<token>`; other sockets are untouched.
+- A local relay (`./tools/run-relay.sh`, `ws://localhost:8086/`) runs in rootlessRelay's
+  default mode and needs no token.
+- You can override the URL in the Controls tab and click **Apply + Reload**.
 - Click **Disable Network** to boot without a relay.
 - The Zephyr `native_sim` app uses offloaded sockets in this flow.
 
@@ -154,7 +163,9 @@ Why `wsproxy` for phase 1:
 - It is the best fit for Zephyr socket-style app behavior in this runtime.
 - v86 `wisp` and `fetch` backends are useful for specific scenarios but more limited for this target flow.
 
-Note: the public relay is a convenience endpoint and may be bandwidth-limited. Plan to switch this URL to your own relay infrastructure for production.
+Note: the hosted relay enforces per-tier bandwidth, session and port limits and refuses
+connections to private networks. The status chip reports a refused socket (bad or missing
+token, or a page origin the relay does not allow) and sessions the relay closes.
 
 ## Important Zephyr Configuration
 
