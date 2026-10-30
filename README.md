@@ -108,10 +108,13 @@ Once booted:
 1. Wait for Buildroot shell prompt
 2. `zephyr.exe` is auto-injected by `web/main.js` into the 9p share, which the guest
    mounts at `/mnt`, with the execute bit set
-3. Get an address from the relay, then start the Zephyr networking app:
+3. Get an address from the relay, check that the internet answers, then start the
+   Zephyr networking app:
 
 ```bash
 udhcpc
+nslookup example.com
+wget -O - http://example.com/
 /mnt/zephyr.exe
 ```
 
@@ -149,10 +152,17 @@ busybox nc 127.0.0.1 4242
 
 - The web runtime enables v86 networking with `wsproxy` when the **Networking proxy** field is non-empty.
 - Default relay URL: `wss://relay.relaynet.network/`, a hosted
-  [rootlessRelay](https://github.com/beriberikix/rootlessRelay) that requires a token:
+  [rootlessRelay](https://github.com/beriberikix/rootlessRelay) that needs a token:
+  - **No token (the default)**: when the VM boots, the page asks the relay for an
+    anonymous demo token (15 minutes, one session, ports 80 and 443). Nothing to set up.
   - **API token**: sign in at <https://relaynet.network>, create a token, paste it into
-    **Relay token**, click **Apply + Reload**. Account tier limits apply.
-  - relaynet is in an invite-only beta; there is no anonymous access.
+    **Relay token**, click **Apply + Reload**. Your account's limits apply.
+  - `?relay=staging` uses `wss://relay-staging.relaynet.network/` for that visit.
+- When the relay closes the connection (the demo token or session expired, the relay is
+  full, or relaynet's free tier is paused for the month), the Network chip says why and a
+  **Reconnect** button appears. Reconnect gets a new demo token and reconnects on the
+  guest's next packet (for example `udhcpc`), without rebooting the VM. Until then the
+  page stops v86's own redials, which would otherwise retry every 10 seconds.
 - v86 cannot pass WebSocket subprotocols itself, so `main.js` wraps `WebSocket` for the
   relay host and adds `relay.v1` plus `relay.token.<token>`; other sockets are untouched.
 - A local relay (`./tools/run-relay.sh`, `ws://localhost:8086/`) runs in rootlessRelay's

@@ -9,9 +9,14 @@ const THEME_STORAGE_KEY = "zephyr-v86-theme-mode";
 const NETWORK_RELAY_STORAGE_KEY = "zephyr-v86-network-relay";
 const NETWORK_TOKEN_STORAGE_KEY = "zephyr-v86-network-token";
 // Hosted relaynet relay (rootlessRelay in hosted mode). It requires a token:
-// an API token from https://relaynet.network. Local relays in the default
-// mode need none.
+// an API token from https://relaynet.network, or, with none, a short-lived
+// anonymous demo token the page requests when the VM boots. Local relays in
+// the default mode need none.
 const DEFAULT_NETWORK_RELAY_URL = "wss://relay.relaynet.network/";
+const STAGING_NETWORK_RELAY_URL = "wss://relay-staging.relaynet.network/";
+// Relays that issue anonymous demo tokens. For these the page also stops
+// v86's own reconnects after a close (see install_relay_token_shim).
+const RELAYNET_HOSTS = ["relay.relaynet.network", "relay-staging.relaynet.network"];
 const DEFAULT_NETWORK_NIC_TYPE = "ne2k";
 
 function get_system_theme()
@@ -88,6 +93,99 @@ function get_effective_network_token()
     return input ? input.value.trim() : "";
 }
 
+function is_relaynet_url(relay_url)
+{
+    try
+    {
+        return RELAYNET_HOSTS.includes(new URL(relay_url, location.href).host);
+    }
+    catch(e)
+    {
+        return false;
+    }
+}
+
+// HTTP origin of the relay, for its token endpoint (wss://host/ -> https://host).
+function relay_http_origin(relay_url)
+{
+    const url = new URL(relay_url, location.href);
+    url.protocol = url.protocol === "ws:" ? "http:" : "https:";
+    return url.origin;
+}
+
+// A short-lived anonymous token (15 minutes, one session). Returns { token }
+// or { error, message }, the message being what the page shows.
+async function request_anon_token(relay_url)
+{
+    let response;
+    let body = {};
+    try
+    {
+        response = await fetch(relay_http_origin(relay_url) + "/api/anon/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+        });
+        body = await response.json().catch(function() { return {}; });
+    }
+    catch(e)
+    {
+        return { error: "network", message: "Could not reach the relay." };
+    }
+    if(response.ok && body.token)
+    {
+        return { token: body.token };
+    }
+    if(body.error === "free-tier-paused")
+    {
+        return { error: body.error, message: "The free tier is paused until " + body.pausedUntil + "." };
+    }
+    if(body.error === "relay-full")
+    {
+        return { error: body.error, message: "The relay is full. Try again in a few minutes." };
+    }
+    if(body.error === "anon-token-rate-limited")
+    {
+        return { error: body.error, message: "Too many demo tokens from this network. Try again later." };
+    }
+    return { error: body.error || String(response.status), message: "The relay refused a demo token (" + (body.error || response.status) + ")." };
+}
+
+// What the socket shim connects with. The token can change (Reconnect
+// fetches a new demo token), so the shim reads it here on every socket.
+// `stopped` is set after a close from a relaynet host: v86 redials on its
+// own (at once, then every 10 seconds while the guest sends), which would
+// keep knocking with an expired token or into a full relay.
+const relay_session = { url: "", token: "", anonymous: false, managed: false, stopped: false };
+
+function show_reconnect(visible)
+{
+    const button = $("network_reconnect");
+    if(button)
+    {
+        button.style.display = visible ? "" : "none";
+    }
+}
+
+async function reconnect_relay()
+{
+    if(relay_session.anonymous)
+    {
+        set_network_status("Requesting a demo token", "muted");
+        const result = await request_anon_token(relay_session.url);
+        if(!result.token)
+        {
+            set_network_status(result.message, "error");
+            return;
+        }
+        relay_session.token = result.token;
+    }
+    relay_session.stopped = false;
+    show_reconnect(false);
+    // v86 dials on the guest's next packet, for example `udhcpc`.
+    set_network_status("Ready: connects on the guest's next packet", "muted");
+}
+
 // v86 opens the relay socket itself with `new WebSocket(url)` and no way to
 // pass subprotocols, which is the only channel a browser has for a token.
 // Wrap the global constructor so sockets to the relay host carry
@@ -103,8 +201,12 @@ function bump_relay_stat(key)
     }
 }
 
-function install_relay_token_shim(relay_url, token)
+function install_relay_token_shim(relay_url, token, anonymous)
 {
+    relay_session.url = relay_url;
+    relay_session.token = token;
+    relay_session.anonymous = Boolean(anonymous);
+    relay_session.managed = is_relaynet_url(relay_url);
     const Native = window.WebSocket;
     if(!Native || Native.__relay_shim)
     {
@@ -126,10 +228,16 @@ function install_relay_token_shim(relay_url, token)
         {
             return protocols === undefined ? new Native(url) : new Native(url, protocols);
         }
+        // After a close, refuse v86's own redials until Reconnect is clicked.
+        // v86 catches this in its connect() and logs it.
+        if(relay_session.stopped)
+        {
+            throw new Error("relay connection stopped: click Reconnect");
+        }
         // Without a token (local relay in default mode) open it unchanged but
         // still count frames.
-        const socket = token
-            ? new Native(url, ["relay.v1", "relay.token." + token])
+        const socket = relay_session.token
+            ? new Native(url, ["relay.v1", "relay.token." + relay_session.token])
             : new Native(url);
         const native_send = socket.send.bind(socket);
         socket.send = function(data)
@@ -149,20 +257,38 @@ function install_relay_token_shim(relay_url, token)
         });
         socket.addEventListener("close", function(event)
         {
+            if(event.code === 1001)
+            {
+                // A relay deploy: v86 redials by itself with the same token.
+                set_network_status("Relay restarting", "muted");
+                return;
+            }
+            if(relay_session.managed)
+            {
+                relay_session.stopped = true;
+                show_reconnect(true);
+            }
+            const again = relay_session.managed ? ". Click Reconnect to try again." : "";
             if(!opened)
             {
-                // Rejected before the handshake completed: almost always 401/403
-                // from the relay (missing, expired or revoked token) or a
-                // disallowed page origin.
-                set_network_status("Relay refused connection (check token)", "error");
+                // Rejected before the handshake completed: a missing, expired or
+                // revoked token, or a disallowed page origin. relaynet reports
+                // its other refusals (relay full, limits, paused) as a close.
+                set_network_status(relay_session.anonymous
+                    ? "Connection failed" + again
+                    : "Relay refused connection (check token)", "error");
             }
             else if(event.code === 1008)
             {
                 set_network_status("Session closed by relay: " + (event.reason || "policy"), "error");
             }
-            else if(event.code === 1001)
+            else if(event.code === 1013)
             {
-                set_network_status("Relay restarting", "muted");
+                set_network_status("Relay busy: " + (event.reason || "try again later") + again, "error");
+            }
+            else if(relay_session.managed)
+            {
+                set_network_status("Relay closed (" + event.code + ")" + (event.reason ? ": " + event.reason : "") + again, "error");
             }
         });
         return socket;
@@ -230,18 +356,33 @@ function init_network_controls()
         {
             localStorage.setItem(NETWORK_TOKEN_STORAGE_KEY, this.value.trim());
         });
+    }
+
+    // ?relay=staging tries the staging relay for this visit, without saving it.
+    const saved = localStorage.getItem(NETWORK_RELAY_STORAGE_KEY);
+    const initial = new URLSearchParams(location.search).get("relay") === "staging"
+        ? STAGING_NETWORK_RELAY_URL
+        : saved === null ? DEFAULT_NETWORK_RELAY_URL : saved;
+    if(token_input)
+    {
         if(token_input.value)
         {
             set_token_status("Using the saved API token.", "info");
+        }
+        else if(is_relaynet_url(initial))
+        {
+            set_token_status("No token needed: the demo gets a temporary one (15 minutes) when the VM boots. Paste an API token from relaynet.network to use your account.", "info");
         }
         else
         {
             set_token_status("No token: paste an API token from relaynet.network.", "info");
         }
     }
-
-    const saved = localStorage.getItem(NETWORK_RELAY_STORAGE_KEY);
-    const initial = saved === null ? DEFAULT_NETWORK_RELAY_URL : saved;
+    const reconnect_button = $("network_reconnect");
+    if(reconnect_button)
+    {
+        reconnect_button.onclick = reconnect_relay;
+    }
     relay_input.value = initial;
     if(relay_active)
     {
@@ -976,15 +1117,44 @@ async function start_buildroot()
 {
     set_status("Starting", "muted");
     const relay_url = get_effective_network_relay_url();
-    const relay_token = relay_url ? get_effective_network_token() : "";
+    let relay_token = relay_url ? get_effective_network_token() : "";
+    let anonymous = false;
+    let refusal = null;
+
+    // No API token for a relaynet host: ask it for an anonymous demo token.
+    // It answers why when it can't (free tier paused, relay full).
+    if(relay_url && !relay_token && is_relaynet_url(relay_url))
+    {
+        set_network_status("Requesting a demo token", "muted");
+        const result = await request_anon_token(relay_url);
+        anonymous = true;
+        if(result.token)
+        {
+            relay_token = result.token;
+        }
+        else
+        {
+            refusal = result.message;
+        }
+    }
 
     if(relay_url)
     {
         // Always wrap: adds the token when there is one and counts frames.
         // Without a token, local relays in the default mode still accept the
         // socket; the hosted relay refuses it and the status chip says so.
-        install_relay_token_shim(relay_url, relay_token);
-        set_network_status(relay_token ? "Connecting" : "Connecting (no token)", "muted");
+        install_relay_token_shim(relay_url, relay_token, anonymous);
+        if(refusal)
+        {
+            // Keep the network device so Reconnect can start it later.
+            relay_session.stopped = true;
+            show_reconnect(true);
+            set_network_status(refusal + " Click Reconnect to try again.", "error");
+        }
+        else
+        {
+            set_network_status(relay_token ? "Connecting" : "Connecting (no token)", "muted");
+        }
     }
     else
     {
