@@ -61,17 +61,26 @@ RUN make buildroot-defconfig && \
 # Copy artifacts to root for extraction.
 # Buildroot configs can produce either rootfs.cpio.xz or rootfs.cpio.
 # Always export /root/rootfs.cpio.xz so downstream scripts stay stable.
+#
+# The kernel's initramfs XZ decoder only accepts the CRC32 (or no) integrity
+# check, so xz's default CRC64 makes it log "Initramfs unpacking failed:
+# Input was encoded with settings that are not supported by this XZ
+# decoder" and skip the archive. Recompress either way with the settings
+# Documentation/staging/xz.rst recommends, and fail the build otherwise.
 RUN set -eux; \
     cp build/v86/images/bzImage /root/bzImage; \
     if [ -f build/v86/images/rootfs.cpio.xz ]; then \
-        cp build/v86/images/rootfs.cpio.xz /root/rootfs.cpio.xz; \
+        xz -dc build/v86/images/rootfs.cpio.xz > /tmp/rootfs.cpio; \
     elif [ -f build/v86/images/rootfs.cpio ]; then \
-        xz -c -9e build/v86/images/rootfs.cpio > /root/rootfs.cpio.xz; \
+        cp build/v86/images/rootfs.cpio /tmp/rootfs.cpio; \
     else \
         echo "[!] Could not find rootfs.cpio.xz or rootfs.cpio in build/v86/images"; \
         ls -lah build/v86/images; \
         exit 1; \
     fi; \
+    xz -c --check=crc32 --lzma2=preset=9e,dict=1MiB /tmp/rootfs.cpio > /root/rootfs.cpio.xz; \
+    rm /tmp/rootfs.cpio; \
+    xz -lvv /root/rootfs.cpio.xz | grep -Eq '^ +Check: +CRC32$'; \
     echo "[*] Build artifacts ready:"; \
     ls -lh /root/
 
