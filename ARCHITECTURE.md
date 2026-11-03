@@ -44,17 +44,30 @@ configured in the Controls tab of the web UI.
 
 | Backend | Relay URL | Needs Server | Protocols | Use Case |
 |---------|-----------|:---:|-----------|----------|
+| **wsproxy (relaynet, default)** | `wss://relay.relaynet.network/` | No (hosted) | TCP, UDP | The demo: real networking with nothing to run |
+| **wsproxy (self-hosted)** | `ws://localhost:8086/` or your own `wss://…` | Yes | TCP, UDP, ICMP | Offline work, or no token limits |
 | **fetch** | `fetch` | No | HTTP only | Development / offline testing |
-| **wsproxy** | `ws://…` or `wss://…` | Yes | TCP, UDP, ICMP | Full networking via relay server |
 
-The **fetch** backend is the default — it works without any external server by
-using the browser's `fetch()` API to handle outbound HTTP from the guest.  For
-full TCP/UDP networking (CoAP, MQTT, arbitrary sockets), use a **wsproxy** relay.
+The default is [relaynet](https://relaynet.network), a hosted
+[rootlessRelay](https://github.com/beriberikix/rootlessRelay) that speaks
+v86's wsproxy protocol behind a token. With no token set, the page asks it
+for an anonymous demo token (15 minutes, one session, ports 80 and 443)
+when the VM boots; an API token from relaynet.network, pasted into
+**Relay token**, gets your account's limits instead. v86 cannot pass
+WebSocket subprotocols itself, so `web/main.js` wraps `WebSocket` for the
+relay host and adds `relay.v1` plus `relay.token.<token>`. See the README's
+"Networking Configuration" for staging, Reconnect and close reasons.
 
-### Recommended Relay: RootlessRelay
+The **fetch** backend works without any relay by using the browser's
+`fetch()` API to handle outbound HTTP from the guest. For full TCP/UDP
+networking (CoAP, MQTT, arbitrary sockets) use a **wsproxy** relay.
 
+### Self-hosted Relay: RootlessRelay
+
+To run without relaynet, for example offline,
 [RootlessRelay](https://github.com/obegron/rootlessRelay) is a pure Node.js
-wsproxy-compatible relay that requires no root, TUN/TAP, or dnsmasq:
+wsproxy-compatible relay that requires no root, TUN/TAP, or dnsmasq, and in
+its default mode needs no token:
 
 ```bash
 # Start a local relay (WS mode on port 8086):
@@ -63,12 +76,12 @@ wsproxy-compatible relay that requires no root, TUN/TAP, or dnsmasq:
 # Then set the relay URL in the web UI to: ws://localhost:8086/
 ```
 
-RootlessRelay provides:
+RootlessRelay (and relaynet, which runs it in hosted mode) provides:
 - Built-in DHCP server (assigns IPs in the `10.0.2.x` range, gateway `10.0.2.2`)
 - DNS forwarding (default: `8.8.8.8`)
 - TCP and UDP NAT to the Internet
 - VM-to-VM routing
-- Admin UI on port 8001
+- Admin UI on port 8001 (self-hosted only)
 - WSS support (with `--wss` flag)
 
 ### Data Path (wsproxy)
@@ -176,8 +189,10 @@ The old direct-ELF web flow (`web/app.js`, `web/style.css`, `web/zephyr.elf`) is
 - If UART PTY creation fails in `native_sim`, keep stdin/stdout mode enabled in `firmware/prj.conf`.
 - Keep `web/index.html` and `web/main.js` in sync; those are the canonical web entrypoints.
 - Keep boot artifacts (`v86-bzimage.bin`, `v86-rootfs.cpio.xz`, `zephyr.exe`) available under `web/`.
-- Network backend defaults to `fetch` (HTTP-only, no server needed).
-- For full TCP/UDP networking, start a local relay with `./tools/run-relay.sh`
-  and set the relay URL to `ws://localhost:8086/` in the web UI.
+- Network backend defaults to relaynet (`wss://relay.relaynet.network/`) with an
+  anonymous demo token; set the relay URL to `fetch` for HTTP-only networking with
+  no relay at all.
+- To work offline, start a local relay with `./tools/run-relay.sh` and set the
+  relay URL to `ws://localhost:8086/` in the web UI.
 - The Zephyr test app (`firmware/src/main.c`) uses `10.0.2.2` as the relay
-  gateway address — this matches RootlessRelay defaults.
+  gateway address — this matches relaynet and RootlessRelay defaults.
